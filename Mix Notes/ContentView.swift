@@ -361,26 +361,36 @@ struct ShareSheet: UIViewControllerRepresentable {
 
 struct BannerAdView: View {
     let adUnitID: String
-
-    @State private var bannerHeight: CGFloat = GADPortraitAnchoredAdaptiveBannerAdSizeWithWidth(UIScreen.main.bounds.width).size.height
+    @State private var containerWidth: CGFloat = UIScreen.main.bounds.width
 
     var body: some View {
-        GeometryReader { geometry in
-            BannerContainer(
-                adUnitID: adUnitID,
-                width: geometry.size.width,
-                height: $bannerHeight
-            )
-            .frame(width: geometry.size.width, height: bannerHeight)
+        BannerContainer(
+            adUnitID: adUnitID,
+            width: containerWidth
+        )
+        .frame(maxWidth: .infinity)
+        .background(
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { updateWidth(geometry.size.width) }
+                    .onChange(of: geometry.size.width) { oldWidth, newWidth in
+                        updateWidth(newWidth)
+                    }
+            }
+        )
+    }
+
+    private func updateWidth(_ newWidth: CGFloat) {
+        let adjustedWidth = max(newWidth, 320)
+        if abs(Double(adjustedWidth - containerWidth)) > .ulpOfOne {
+            containerWidth = adjustedWidth
         }
-        .frame(height: bannerHeight)
     }
 }
 
 private struct BannerContainer: UIViewRepresentable {
     let adUnitID: String
     let width: CGFloat
-    @Binding var height: CGFloat
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -409,7 +419,6 @@ private struct BannerContainer: UIViewRepresentable {
         context.coordinator.widthConstraint = widthConstraint
 
         banner.load(GADRequest())
-        height = size.size.height
 
         return container
     }
@@ -417,7 +426,6 @@ private struct BannerContainer: UIViewRepresentable {
     func updateUIView(_ uiView: UIView, context: Context) {
         guard let banner = context.coordinator.bannerView else { return }
         let size = adaptiveSize(for: width)
-        let newHeight = size.size.height
 
         if !GADAdSizeEqualToSize(banner.adSize, size) {
             banner.adSize = size
@@ -435,10 +443,6 @@ private struct BannerContainer: UIViewRepresentable {
 
         if let widthConstraint = context.coordinator.widthConstraint, abs(Double(widthConstraint.constant - size.size.width)) > .ulpOfOne {
             widthConstraint.constant = size.size.width
-        }
-
-        if abs(Double(newHeight - height)) > .ulpOfOne {
-            height = newHeight
         }
     }
 

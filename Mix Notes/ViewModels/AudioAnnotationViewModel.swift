@@ -1,6 +1,8 @@
 import Foundation
 import AVFoundation
 import UniformTypeIdentifiers
+import MediaPlayer
+import UIKit
 
 class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var annotations: [AudioAnnotation] = []
@@ -19,11 +21,16 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     private var timer: Timer?
     private var currentFileURL: URL?
     private var currentStoredFile: StoredAudioFile?
+    private var nowPlayingInfo: [String: Any] = [:]
+    private let commandCenter = MPRemoteCommandCenter.shared()
+    private var remoteCommandsConfigured = false
+    private var isReceivingRemoteEvents = false
     
     override     init() {
         super.init()
         loadStoredFilesList()
         cleanUpInvalidStoredFiles()
+        setupRemoteCommandCenter()
     }
     
     func loadAudio(from url: URL) {
@@ -83,8 +90,8 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     
     func loadStoredAudio(_ storedFile: StoredAudioFile) {
         print("Loading stored audio file: \(storedFile.fileName)")
-        print("Stored URL: \(storedFile.storedURL)")
-        
+        print("Stored URL (relative): \(storedFile.storedURL)")
+
         do {
             // Stop any current playback first
             audioPlayer?.stop()
@@ -93,9 +100,9 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
             // Configure audio session for playback with background capability
             try configureAudioSession()
             
-            let storedURL = URL(string: storedFile.storedURL)!
-            print("Created URL from string: \(storedURL)")
-            
+            let storedURL = storedFile.resolvedStoredFileURL
+            print("Resolved stored file URL: \(storedURL)")
+
             // Check if file exists
             let fileExists = FileManager.default.fileExists(atPath: storedURL.path)
             print("File exists at path: \(fileExists)")
@@ -106,6 +113,8 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
                 storedAudioFiles.removeAll { $0.id == storedFile.id }
                 saveStoredFilesList()
                 hasLoadedAudio = false
+                clearNowPlayingInfo()
+                endReceivingRemoteControlEventsIfNeeded()
                 return
             }
             
@@ -118,12 +127,14 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
             currentStoredFile = storedFile
             hasLoadedAudio = true
             duration = storedFile.duration
-            
+
             print("Successfully loaded audio file. Duration: \(duration)")
-            
+
             // Load any saved annotations for this file
             loadAnnotations(for: storedURL)
-            
+
+            updateNowPlayingInfo(playbackRate: 0)
+
         } catch {
             print("Error loading stored audio: \(error)")
             hasLoadedAudio = false
@@ -142,9 +153,11 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         do {
             // Ensure audio session is active for playback
             try AVAudioSession.sharedInstance().setActive(true)
+            beginReceivingRemoteControlEventsIfNeeded()
             audioPlayer?.play()
             isPlaying = true
             startTimer()
+            updateNowPlayingInfo(playbackRate: 1.0)
         } catch {
             print("Error activating audio session: \(error)")
         }
@@ -154,6 +167,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         audioPlayer?.pause()
         isPlaying = false
         stopTimer()
+        updateNowPlayingInfo(playbackRate: 0.0)
     }
     
     func addAnnotation(_ type: AnnotationType, customText: String? = nil) {
@@ -173,6 +187,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
             guard let self = self, let player = self.audioPlayer, player.duration > 0 else { return }
             self.currentTime = player.currentTime
             self.progress = player.currentTime / player.duration
+            self.updateNowPlayingElapsedTime(player.currentTime)
         }
     }
     
@@ -250,6 +265,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         player.currentTime = newTime
         currentTime = newTime
         progress = player.duration > 0 ? newTime / player.duration : 0
+        updateNowPlayingElapsedTime(newTime)
     }
     
     func goForward(by seconds: TimeInterval) {
@@ -258,6 +274,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         player.currentTime = newTime
         currentTime = newTime
         progress = newTime / player.duration
+        updateNowPlayingElapsedTime(newTime)
     }
     
     func goToBeginning() {
@@ -265,6 +282,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         player.currentTime = 0
         currentTime = 0
         progress = 0
+        updateNowPlayingElapsedTime(0)
     }
     
     func stop() {
@@ -276,6 +294,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         currentTime = 0
         progress = 0
         stopTimer()
+        updateNowPlayingInfo(playbackRate: 0.0)
     }
     
     func rewindFiveSeconds() {
@@ -283,6 +302,9 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         // Calculate new time and ensure it doesn't go below 0
         let newTime = max(player.currentTime - 5.0, 0)
         player.currentTime = newTime
+        currentTime = newTime
+        progress = player.duration > 0 ? newTime / player.duration : 0
+        updateNowPlayingElapsedTime(newTime)
     }
     
     func reset() {
@@ -296,6 +318,8 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         currentFileURL = nil
         currentStoredFile = nil
         stopTimer()
+        endReceivingRemoteControlEventsIfNeeded()
+        clearNowPlayingInfo()
     }
     
     func deleteStoredFile(_ storedFile: StoredAudioFile) {
@@ -304,9 +328,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         saveStoredFilesList()
         
         // Delete the actual file
-        if let storedURL = URL(string: storedFile.storedURL) {
-            try? FileManager.default.removeItem(at: storedURL)
-        }
+        try? FileManager.default.removeItem(at: storedFile.resolvedStoredFileURL)
         
         // If this was the currently loaded file, reset
         if currentStoredFile?.id == storedFile.id {
@@ -342,15 +364,12 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     
     private func cleanUpInvalidStoredFiles() {
         let validFiles = storedAudioFiles.filter { storedFile in
-            if let storedURL = URL(string: storedFile.storedURL) {
-                let exists = FileManager.default.fileExists(atPath: storedURL.path)
-                if !exists {
-                    print("Removing invalid stored file: \(storedFile.fileName) at \(storedURL.path)")
-                }
-                return exists
+            let storedURL = storedFile.resolvedStoredFileURL
+            let exists = FileManager.default.fileExists(atPath: storedURL.path)
+            if !exists {
+                print("Removing invalid stored file: \(storedFile.fileName) at \(storedURL.path)")
             }
-            print("Removing stored file with invalid URL: \(storedFile.fileName)")
-            return false
+            return exists
         }
         
         if validFiles.count != storedAudioFiles.count {
@@ -374,13 +393,132 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         let time = progress * player.duration
         player.currentTime = time
         currentTime = time
-        
+
         // If we were playing before the seek, continue playing
         if isPlaying {
             player.play()
         }
+        updateNowPlayingElapsedTime(time)
     }
-    
+
+    // MARK: - Now Playing & Remote Controls
+
+    private func setupRemoteCommandCenter() {
+        guard !remoteCommandsConfigured else { return }
+        remoteCommandsConfigured = true
+
+        commandCenter.playCommand.addTarget { [weak self] _ in
+            self?.handlePlayCommand()
+            return .success
+        }
+
+        commandCenter.pauseCommand.addTarget { [weak self] _ in
+            self?.handlePauseCommand()
+            return .success
+        }
+
+        commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+            self?.handleTogglePlayPauseCommand()
+            return .success
+        }
+
+        commandCenter.stopCommand.addTarget { [weak self] _ in
+            self?.handleStopCommand()
+            return .success
+        }
+
+        if #available(iOS 9.1, *) {
+            commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+                guard
+                    let self,
+                    let event = event as? MPChangePlaybackPositionCommandEvent,
+                    let player = self.audioPlayer
+                else { return .commandFailed }
+
+                player.currentTime = event.positionTime
+                self.currentTime = event.positionTime
+                self.progress = player.duration > 0 ? event.positionTime / player.duration : 0
+                self.updateNowPlayingElapsedTime(event.positionTime)
+                if self.isPlaying {
+                    player.play()
+                }
+                return .success
+            }
+        }
+    }
+
+    private func handlePlayCommand() {
+        DispatchQueue.main.async { [weak self] in
+            self?.playAudio()
+        }
+    }
+
+    private func handlePauseCommand() {
+        DispatchQueue.main.async { [weak self] in
+            self?.pauseAudio()
+        }
+    }
+
+    private func handleTogglePlayPauseCommand() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isPlaying ? self.pauseAudio() : self.playAudio()
+        }
+    }
+
+    private func handleStopCommand() {
+        DispatchQueue.main.async { [weak self] in
+            self?.stop()
+        }
+    }
+
+    private func beginReceivingRemoteControlEventsIfNeeded() {
+        guard !isReceivingRemoteEvents else { return }
+        isReceivingRemoteEvents = true
+        DispatchQueue.main.async {
+            UIApplication.shared.beginReceivingRemoteControlEvents()
+        }
+    }
+
+    private func endReceivingRemoteControlEventsIfNeeded() {
+        guard isReceivingRemoteEvents else { return }
+        isReceivingRemoteEvents = false
+        DispatchQueue.main.async {
+            UIApplication.shared.endReceivingRemoteControlEvents()
+        }
+    }
+
+    private func updateNowPlayingInfo(playbackRate: Float? = nil) {
+        guard let player = audioPlayer else { return }
+
+        nowPlayingInfo[MPMediaItemPropertyTitle] = currentFileName.isEmpty ? "Audio File" : currentFileName
+        nowPlayingInfo[MPMediaItemPropertyArtist] = "Mix Notes"
+        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = player.duration
+        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = player.currentTime
+
+        let rate = playbackRate ?? (isPlaying ? 1.0 : 0.0)
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = rate
+
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        if #available(iOS 13.0, *) {
+            MPNowPlayingInfoCenter.default().playbackState = rate == 0 ? .paused : .playing
+        }
+    }
+
+    private func updateNowPlayingElapsedTime(_ elapsed: TimeInterval) {
+        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+    }
+
+    private func clearNowPlayingInfo() {
+        nowPlayingInfo = [:]
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        if #available(iOS 13.0, *) {
+            MPNowPlayingInfoCenter.default().playbackState = .stopped
+        }
+    }
+
     private func getAnnotationsDirectory() -> URL {
         let paths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
         return paths[0].appendingPathComponent("Annotations")
@@ -432,6 +570,8 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         DispatchQueue.main.async {
             self.isPlaying = false
             self.stopTimer()
+            self.updateNowPlayingInfo(playbackRate: 0.0)
+            self.updateNowPlayingElapsedTime(self.audioPlayer?.duration ?? self.currentTime)
         }
     }
     
@@ -440,6 +580,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         DispatchQueue.main.async {
             self.isPlaying = false
             self.stopTimer()
+            self.updateNowPlayingInfo(playbackRate: 0.0)
         }
     }
 }
