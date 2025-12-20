@@ -16,11 +16,15 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     @Published var storedAudioFiles: [StoredAudioFile] = []
     @Published var showingRecents: Bool = false
     @Published var isLoadingFromBrowse: Bool = false
+    @Published var currentLibrarySong: LibrarySong?
     
     private var audioPlayer: AVAudioPlayer?
+    private var libraryPlayer: AVQueuePlayer?
+    private var libraryItemDidEndObserver: NSObjectProtocol?
     private var timer: Timer?
     private var currentFileURL: URL?
     private var currentStoredFile: StoredAudioFile?
+    private var currentAnnotationIdentifier: String?
     private var nowPlayingInfo: [String: Any] = [:]
     private let commandCenter = MPRemoteCommandCenter.shared()
     private var remoteCommandsConfigured = false
@@ -31,6 +35,10 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         loadStoredFilesList()
         cleanUpInvalidStoredFiles()
         setupRemoteCommandCenter()
+    }
+
+    deinit {
+        clearLibraryPlayer()
     }
     
     func loadAudio(from url: URL) {
@@ -94,8 +102,11 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
 
         do {
             // Stop any current playback first
+            clearLibraryPlayer()
             audioPlayer?.stop()
             audioPlayer = nil
+            stopTimer()
+            isPlaying = false
             
             // Configure audio session for playback with background capability
             try configureAudioSession()
@@ -113,6 +124,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
                 storedAudioFiles.removeAll { $0.id == storedFile.id }
                 saveStoredFilesList()
                 hasLoadedAudio = false
+                currentAnnotationIdentifier = nil
                 clearNowPlayingInfo()
                 endReceivingRemoteControlEventsIfNeeded()
                 return
@@ -125,20 +137,77 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
             currentFileURL = storedURL
             currentFileName = storedFile.fileName
             currentStoredFile = storedFile
+            currentLibrarySong = nil
+            currentAnnotationIdentifier = annotationIdentifier(forStoredURL: storedURL)
             hasLoadedAudio = true
             duration = storedFile.duration
 
             print("Successfully loaded audio file. Duration: \(duration)")
 
             // Load any saved annotations for this file
-            loadAnnotations(for: storedURL)
+            if let identifier = currentAnnotationIdentifier {
+                loadAnnotations(for: identifier)
+            } else {
+                annotations = []
+            }
 
             updateNowPlayingInfo(playbackRate: 0)
 
         } catch {
             print("Error loading stored audio: \(error)")
             hasLoadedAudio = false
+            currentAnnotationIdentifier = nil
         }
+    }
+
+    func loadLibrarySong(_ song: LibrarySong) {
+        audioPlayer?.stop()
+        audioPlayer = nil
+        clearLibraryPlayer()
+        stopTimer()
+        isPlaying = false
+
+        do {
+            try configureAudioSession()
+        } catch {
+            print("Error configuring audio session: \(error)")
+        }
+
+        let playerItem = AVPlayerItem(url: song.assetURL)
+        let player = AVQueuePlayer(items: [playerItem])
+        player.actionAtItemEnd = .pause
+
+        libraryPlayer = player
+        libraryItemDidEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleLibraryPlaybackFinished()
+        }
+
+        currentFileURL = song.assetURL
+        currentFileName = song.displayTitle
+        currentStoredFile = nil
+        currentLibrarySong = song
+        currentAnnotationIdentifier = annotationIdentifier(for: song)
+        hasLoadedAudio = true
+        currentTime = 0
+        progress = 0
+
+        let itemDuration = playerItem.asset.duration.seconds
+        if itemDuration.isFinite && itemDuration > 0 {
+            duration = itemDuration
+        } else {
+            duration = song.duration
+        }
+
+        if let identifier = currentAnnotationIdentifier {
+            loadAnnotations(for: identifier)
+        } else {
+            annotations = []
+        }
+        updateNowPlayingInfo(playbackRate: 0)
     }
     
     func togglePlayback() {
@@ -150,11 +219,16 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     }
     
     func playAudio() {
+        guard audioPlayer != nil || libraryPlayer != nil else { return }
         do {
             // Ensure audio session is active for playback
             try AVAudioSession.sharedInstance().setActive(true)
             beginReceivingRemoteControlEventsIfNeeded()
-            audioPlayer?.play()
+            if let player = audioPlayer {
+                player.play()
+            } else if let player = libraryPlayer {
+                player.play()
+            }
             isPlaying = true
             startTimer()
             updateNowPlayingInfo(playbackRate: 1.0)
@@ -165,14 +239,16 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     
     func pauseAudio() {
         audioPlayer?.pause()
+        libraryPlayer?.pause()
         isPlaying = false
         stopTimer()
         updateNowPlayingInfo(playbackRate: 0.0)
     }
     
-    func addAnnotation(_ type: AnnotationType, customText: String? = nil) {
-        guard let currentTime = audioPlayer?.currentTime else { return }
-        let adjustedTime = max(currentTime - 0.2, 0)
+    func addAnnotation(_ type: AnnotationType, customText: String? = nil, timestamp: TimeInterval? = nil) {
+        guard hasLoadedAudio else { return }
+        let baseTime = timestamp ?? currentPlaybackTimeValue()
+        let adjustedTime = max(baseTime - 0.2, 0)
         let annotation = AudioAnnotation(
             timestamp: adjustedTime, 
             type: type,
@@ -181,19 +257,68 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         annotations.append(annotation)
         saveAnnotations() // Save after adding
     }
+
+    func currentAnnotationTimestamp() -> TimeInterval? {
+        guard hasLoadedAudio else { return nil }
+        return currentPlaybackTimeValue()
+    }
     
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let self = self, let player = self.audioPlayer, player.duration > 0 else { return }
-            self.currentTime = player.currentTime
-            self.progress = player.currentTime / player.duration
-            self.updateNowPlayingElapsedTime(player.currentTime)
+            guard let self = self else { return }
+            let duration = self.duration
+            guard duration > 0 else { return }
+            let currentTime = self.currentPlaybackTimeValue()
+            self.currentTime = currentTime
+            self.progress = duration > 0 ? currentTime / duration : 0
+            self.updateNowPlayingElapsedTime(currentTime)
         }
     }
     
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
+    }
+
+    private func clearLibraryPlayer() {
+        if let observer = libraryItemDidEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            libraryItemDidEndObserver = nil
+        }
+        libraryPlayer?.pause()
+        libraryPlayer?.removeAllItems()
+        libraryPlayer = nil
+    }
+
+    private func handleLibraryPlaybackFinished() {
+        libraryPlayer?.seek(to: .zero)
+        libraryPlayer?.pause()
+        isPlaying = false
+        stopTimer()
+        currentTime = duration
+        progress = duration > 0 ? 1.0 : 0
+        updateNowPlayingInfo(playbackRate: 0.0)
+        updateNowPlayingElapsedTime(duration)
+    }
+
+    private func currentPlaybackTimeValue() -> TimeInterval {
+        if let player = audioPlayer {
+            return player.currentTime
+        } else if let player = libraryPlayer {
+            let seconds = player.currentTime().seconds
+            return seconds.isFinite ? seconds : currentTime
+        }
+        return currentTime
+    }
+
+    private func setCurrentPlaybackTime(_ time: TimeInterval) {
+        if let player = audioPlayer {
+            player.currentTime = time
+        } else if let player = libraryPlayer {
+            let clamped = max(time, 0)
+            let cmTime = CMTime(seconds: clamped, preferredTimescale: 600)
+            player.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
     }
     
     private func configureAudioSession() throws {
@@ -260,26 +385,26 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     }
     
     func goBackward(by seconds: TimeInterval) {
-        guard let player = audioPlayer else { return }
-        let newTime = max(0, player.currentTime - seconds)
-        player.currentTime = newTime
+        guard hasLoadedAudio else { return }
+        let newTime = max(0, currentPlaybackTimeValue() - seconds)
+        setCurrentPlaybackTime(newTime)
         currentTime = newTime
-        progress = player.duration > 0 ? newTime / player.duration : 0
+        progress = duration > 0 ? newTime / duration : 0
         updateNowPlayingElapsedTime(newTime)
     }
     
     func goForward(by seconds: TimeInterval) {
-        guard let player = audioPlayer, player.duration > 0 else { return }
-        let newTime = min(player.duration, player.currentTime + seconds)
-        player.currentTime = newTime
+        guard hasLoadedAudio, duration > 0 else { return }
+        let newTime = min(duration, currentPlaybackTimeValue() + seconds)
+        setCurrentPlaybackTime(newTime)
         currentTime = newTime
-        progress = newTime / player.duration
+        progress = duration > 0 ? newTime / duration : 0
         updateNowPlayingElapsedTime(newTime)
     }
     
     func goToBeginning() {
-        guard let player = audioPlayer else { return }
-        player.currentTime = 0
+        guard hasLoadedAudio else { return }
+        setCurrentPlaybackTime(0)
         currentTime = 0
         progress = 0
         updateNowPlayingElapsedTime(0)
@@ -287,6 +412,8 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     
     func stop() {
         audioPlayer?.stop()
+        libraryPlayer?.pause()
+        libraryPlayer?.seek(to: .zero)
         isPlaying = false
         // Resetting current time to 0, which is typical for a stop button.
         audioPlayer?.currentTime = 0
@@ -295,21 +422,22 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         progress = 0
         stopTimer()
         updateNowPlayingInfo(playbackRate: 0.0)
+        updateNowPlayingElapsedTime(0)
     }
     
     func rewindFiveSeconds() {
-        guard let player = audioPlayer else { return }
-        // Calculate new time and ensure it doesn't go below 0
-        let newTime = max(player.currentTime - 5.0, 0)
-        player.currentTime = newTime
+        guard hasLoadedAudio else { return }
+        let newTime = max(currentPlaybackTimeValue() - 5.0, 0)
+        setCurrentPlaybackTime(newTime)
         currentTime = newTime
-        progress = player.duration > 0 ? newTime / player.duration : 0
+        progress = duration > 0 ? newTime / duration : 0
         updateNowPlayingElapsedTime(newTime)
     }
     
     func reset() {
         audioPlayer?.stop()
         audioPlayer = nil
+        clearLibraryPlayer()
         hasLoadedAudio = false
         isPlaying = false
         currentTime = 0
@@ -317,6 +445,8 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         duration = 0
         currentFileURL = nil
         currentStoredFile = nil
+        currentLibrarySong = nil
+        currentAnnotationIdentifier = nil
         stopTimer()
         endReceivingRemoteControlEventsIfNeeded()
         clearNowPlayingInfo()
@@ -329,6 +459,9 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         
         // Delete the actual file
         try? FileManager.default.removeItem(at: storedFile.resolvedStoredFileURL)
+        let annotationIdentifier = annotationIdentifier(forStoredURL: storedFile.resolvedStoredFileURL)
+        let annotationURL = annotationsFileURL(for: annotationIdentifier)
+        try? FileManager.default.removeItem(at: annotationURL)
         
         // If this was the currently loaded file, reset
         if currentStoredFile?.id == storedFile.id {
@@ -389,14 +522,21 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     
     
     func seek(to progress: Double) {
-        guard let player = audioPlayer else { return }
-        let time = progress * player.duration
-        player.currentTime = time
+        guard hasLoadedAudio, duration > 0 else { return }
+        let clampedProgress = max(0, min(progress, 1))
+        let time = clampedProgress * duration
+        let wasPlaying = isPlaying
+        setCurrentPlaybackTime(time)
         currentTime = time
+        self.progress = clampedProgress
 
         // If we were playing before the seek, continue playing
-        if isPlaying {
-            player.play()
+        if wasPlaying {
+            if let player = audioPlayer {
+                player.play()
+            } else if let player = libraryPlayer {
+                player.play()
+            }
         }
         updateNowPlayingElapsedTime(time)
     }
@@ -432,15 +572,22 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
                 guard
                     let self,
                     let event = event as? MPChangePlaybackPositionCommandEvent,
-                    let player = self.audioPlayer
+                    self.duration > 0
                 else { return .commandFailed }
 
-                player.currentTime = event.positionTime
-                self.currentTime = event.positionTime
-                self.progress = player.duration > 0 ? event.positionTime / player.duration : 0
-                self.updateNowPlayingElapsedTime(event.positionTime)
-                if self.isPlaying {
-                    player.play()
+                let clamped = max(0, min(event.positionTime, self.duration))
+                let wasPlaying = self.isPlaying
+                self.setCurrentPlaybackTime(clamped)
+                self.currentTime = clamped
+                self.progress = self.duration > 0 ? clamped / self.duration : 0
+                self.updateNowPlayingElapsedTime(clamped)
+
+                if wasPlaying {
+                    if let player = self.audioPlayer {
+                        player.play()
+                    } else if let player = self.libraryPlayer {
+                        player.play()
+                    }
                 }
                 return .success
             }
@@ -489,12 +636,28 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     }
 
     private func updateNowPlayingInfo(playbackRate: Float? = nil) {
-        guard let player = audioPlayer else { return }
+        guard hasLoadedAudio else { return }
 
         nowPlayingInfo[MPMediaItemPropertyTitle] = currentFileName.isEmpty ? "Audio File" : currentFileName
-        nowPlayingInfo[MPMediaItemPropertyArtist] = "Mix Notes"
-        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = player.duration
-        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = player.currentTime
+        if let librarySong = currentLibrarySong {
+            nowPlayingInfo[MPMediaItemPropertyArtist] = librarySong.displaySubtitle
+        } else {
+            nowPlayingInfo[MPMediaItemPropertyArtist] = "Mix Notes"
+        }
+
+        let playbackDuration: TimeInterval
+        if let player = audioPlayer {
+            playbackDuration = player.duration
+        } else if duration > 0 {
+            playbackDuration = duration
+        } else if let itemDuration = libraryPlayer?.currentItem?.duration.seconds, itemDuration.isFinite {
+            playbackDuration = itemDuration
+        } else {
+            playbackDuration = 0
+        }
+
+        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = playbackDuration
+        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentPlaybackTimeValue()
 
         let rate = playbackRate ?? (isPlaying ? 1.0 : 0.0)
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = rate
@@ -524,39 +687,46 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         return paths[0].appendingPathComponent("Annotations")
     }
     
-    private func getAnnotationsFileURL(for audioFileURL: URL) -> URL {
-        // Create a unique identifier based on the audio file path
-        let audioFileIdentifier = audioFileURL.lastPathComponent
-        return getAnnotationsDirectory()
-            .appendingPathComponent(audioFileIdentifier)
+    private func annotationsFileURL(for identifier: String) -> URL {
+        getAnnotationsDirectory()
+            .appendingPathComponent(identifier)
             .appendingPathExtension("annotations")
+    }
+
+    private func annotationIdentifier(forStoredURL url: URL) -> String {
+        url.lastPathComponent
+    }
+
+    private func annotationIdentifier(for song: LibrarySong) -> String {
+        "library-\(song.id)"
     }
     
     private func saveAnnotations() {
-        guard let fileURL = currentFileURL else { return }
-        
+        guard let identifier = currentAnnotationIdentifier else { return }
+
         do {
             let annotationsDirectory = getAnnotationsDirectory()
             if !FileManager.default.fileExists(atPath: annotationsDirectory.path) {
                 try FileManager.default.createDirectory(at: annotationsDirectory, withIntermediateDirectories: true)
             }
-            
+
             let data = try JSONEncoder().encode(annotations)
-            try data.write(to: getAnnotationsFileURL(for: fileURL))
+            try data.write(to: annotationsFileURL(for: identifier))
         } catch {
             print("Error saving annotations: \(error)")
         }
     }
-    
-    private func loadAnnotations(for fileURL: URL) {
+
+    private func loadAnnotations(for identifier: String) {
+        let fileURL = annotationsFileURL(for: identifier)
         do {
-            let data = try Data(contentsOf: getAnnotationsFileURL(for: fileURL))
+            let data = try Data(contentsOf: fileURL)
             let loadedAnnotations = try JSONDecoder().decode([AudioAnnotation].self, from: data)
             DispatchQueue.main.async {
                 self.annotations = loadedAnnotations
             }
         } catch {
-            print("Error loading annotations: \(error)")
+            print("Error loading annotations for identifier \(identifier): \(error)")
             // If there's an error loading (like first time with this file), start with empty annotations
             DispatchQueue.main.async {
                 self.annotations = []

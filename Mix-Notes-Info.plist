@@ -253,5 +253,7 @@
 	<array>
 		<string>leaguespartan-bold.ttf</string>
 	</array>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Mix Notes uses your Music library to play local songs for annotation and playback.</string>
 </dict>
 </plist>
