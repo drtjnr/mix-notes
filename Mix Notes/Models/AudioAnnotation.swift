@@ -5,12 +5,26 @@ struct AudioAnnotation: Identifiable, Codable {
     let timestamp: TimeInterval
     let type: AnnotationType
     let customText: String?
+    let chordIndex: Int?
+    let barIndex: Int?
+    let beatIndex: Int?
     
-    init(id: UUID = UUID(), timestamp: TimeInterval, type: AnnotationType, customText: String? = nil) {
+    init(
+        id: UUID = UUID(),
+        timestamp: TimeInterval,
+        type: AnnotationType,
+        customText: String? = nil,
+        chordIndex: Int? = nil,
+        barIndex: Int? = nil,
+        beatIndex: Int? = nil
+    ) {
         self.id = id
         self.timestamp = timestamp
         self.type = type
         self.customText = customText
+        self.chordIndex = chordIndex
+        self.barIndex = barIndex
+        self.beatIndex = beatIndex
     }
 }
 

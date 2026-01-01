@@ -30,6 +30,15 @@ struct ABTitleView: View {
     }
 }
 
+struct ChordsTitleView: View {
+    var body: some View {
+        Text("chords")
+            .font(.custom("LeagueSpartan-Bold", size: 20))
+            .foregroundColor(.primary)
+            .kerning(-0.5)
+    }
+}
+
 struct ABModeToggleButton: View {
     @Binding var isOn: Bool
 
@@ -55,21 +64,147 @@ struct ABModeToggleButton: View {
     }
 }
 
+struct ChordsModeToggleButton: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                isOn.toggle()
+            }
+        } label: {
+            Text("chords")
+                .font(.custom("LeagueSpartan-Bold", size: 16))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(isOn ? Color.black : Color(.systemGray5))
+                .foregroundColor(isOn ? .white : .primary)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color.black, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct ContentView: View {
     @StateObject private var viewModel: AudioAnnotationViewModel
     @StateObject private var abViewModel = ABAudioAnnotationViewModel()
+    @StateObject private var chordsViewModel = AudioAnnotationViewModel(annotationNamespace: "chords")
     @StateObject private var libraryManager = LibraryManager()
     @State private var showingShareSheet = false
+    @State private var showingChordsShareSheet = false
     @State private var showingCustomAnnotation = false
     @State private var customAnnotationText = ""
     @State private var pendingCustomTimestamp: TimeInterval?
     @State private var showingInstrumentPicker = false
     @State private var selectedAnnotationType: AnnotationType?
-    @State private var isABMode = false
+    @State private var mode: AppMode = .mix
+    @State private var selectedKeyIndex: Double = 0
+    @State private var isMinorKey = false
+    @State private var chordOverrides: [Int: AudioAnnotationViewModel.ChordOverride] = [:]
+    @State private var editingChordIndex: Int?
+    @State private var editingChordText = ""
+    @State private var isDoublePlacement = false
+    @State private var isEditMode = false
+    @State private var isNashvilleMode = false
+    @State private var nextPlacementBar = 0
+    @State private var nextPlacementBeat = 0
+    @State private var lastPlacedBar: Int?
+    @State private var lastPlacedBeat: Int?
 
     let instrumentTypes = ["Vocals", "Bass", "Guitar / Keys", "Drums"]
     let columns = Array(repeating: GridItem(.flexible()), count: 3)
     private let abSelectionAnimation = Animation.spring(response: 0.3, dampingFraction: 0.7)
+    private let chordColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 6)
+    private let keyNames = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+    private let beatsPerBar = 2
+    private let barsPerLine = 4
+
+    private enum AppMode {
+        case mix
+        case ab
+        case chords
+    }
+
+    private enum ChordQuality {
+        case major
+        case minor
+        case diminished
+        case dominant7
+        case major7
+        case minor7
+        case add9
+
+        var suffix: String {
+            switch self {
+            case .major:
+                return ""
+            case .minor:
+                return "m"
+            case .diminished:
+                return "dim"
+            case .dominant7:
+                return "7"
+            case .major7:
+                return "maj7"
+            case .minor7:
+                return "m7"
+            case .add9:
+                return "add9"
+            }
+        }
+    }
+
+    private enum KeyLabelMode {
+        case notes
+        case nashville
+    }
+
+    private struct ChordFormula {
+        let offset: Int
+        let quality: ChordQuality
+    }
+
+    private struct BarBeatSlot: Hashable {
+        let bar: Int
+        let beat: Int
+    }
+
+    private let majorChordsRow1 = [
+        ChordFormula(offset: 0, quality: .major),
+        ChordFormula(offset: 2, quality: .minor),
+        ChordFormula(offset: 4, quality: .minor),
+        ChordFormula(offset: 5, quality: .major),
+        ChordFormula(offset: 7, quality: .major),
+        ChordFormula(offset: 9, quality: .minor)
+    ]
+    private let majorChordsRow2 = [
+        ChordFormula(offset: 0, quality: .major7),
+        ChordFormula(offset: 2, quality: .minor7),
+        ChordFormula(offset: 4, quality: .minor7),
+        ChordFormula(offset: 5, quality: .major7),
+        ChordFormula(offset: 7, quality: .dominant7),
+        ChordFormula(offset: 9, quality: .minor7)
+    ]
+    private let minorChordsRow1 = [
+        ChordFormula(offset: 0, quality: .minor),
+        ChordFormula(offset: 3, quality: .major),
+        ChordFormula(offset: 5, quality: .minor),
+        ChordFormula(offset: 7, quality: .minor),
+        ChordFormula(offset: 8, quality: .major),
+        ChordFormula(offset: 10, quality: .major)
+    ]
+    private let minorChordsRow2 = [
+        ChordFormula(offset: 0, quality: .minor7),
+        ChordFormula(offset: 3, quality: .major7),
+        ChordFormula(offset: 5, quality: .minor7),
+        ChordFormula(offset: 7, quality: .minor7),
+        ChordFormula(offset: 8, quality: .major7),
+        ChordFormula(offset: 10, quality: .dominant7)
+    ]
 
     private enum AdMobIdentifiers {
         static let bannerAdUnitID = "ca-app-pub-2186858726503482/7521622823"
@@ -80,72 +215,72 @@ struct ContentView: View {
     }
 
     private var isShowingABPlayback: Bool {
-        isABMode && abViewModel.hasLoadedAudio
+        mode == .ab && abViewModel.hasLoadedAudio
     }
 
     private var isShowingMixPlayback: Bool {
-        !isABMode && viewModel.hasLoadedAudio
+        mode == .mix && viewModel.hasLoadedAudio
+    }
+
+    private var isShowingChordsPlayback: Bool {
+        mode == .chords && chordsViewModel.hasLoadedAudio
     }
 
     private var isShowingList: Bool {
-        !isShowingABPlayback && !isShowingMixPlayback && !currentLoadingState
+        !isShowingABPlayback && !isShowingMixPlayback && !isShowingChordsPlayback && !currentLoadingState
     }
 
     private var currentLoadingState: Bool {
-        isABMode ? abViewModel.isLoadingFromBrowse : viewModel.isLoadingFromBrowse
+        switch mode {
+        case .ab:
+            return abViewModel.isLoadingFromBrowse
+        case .chords:
+            return chordsViewModel.isLoadingFromBrowse
+        case .mix:
+            return viewModel.isLoadingFromBrowse
+        }
+    }
+
+    private var chordFormulas: [ChordFormula] {
+        if isNashvilleMode {
+            return majorChordsRow1 + majorChordsRow2
+        }
+        if isMinorKey {
+            return minorChordsRow1 + minorChordsRow2
+        }
+        return majorChordsRow1 + majorChordsRow2
+    }
+
+    private var chordChartBars: Int {
+        let maxBar = chordsViewModel.annotations.compactMap { $0.barIndex }.max() ?? -1
+        let baseBars = maxBar + 1
+        let roundedBars = Int(ceil(Double(max(baseBars, 1)) / Double(barsPerLine))) * barsPerLine
+        return max(4, roundedBars)
+    }
+
+    private var currentKeyName: String {
+        let index = min(max(Int(selectedKeyIndex), 0), keyNames.count - 1)
+        return keyNames[index]
+    }
+
+    private var currentKeyIndex: Int {
+        min(max(Int(selectedKeyIndex), 0), keyNames.count - 1)
+    }
+
+    private var keyLabelMode: KeyLabelMode {
+        isNashvilleMode ? .nashville : .notes
+    }
+
+    private var currentKeyDisplayName: String {
+        if isNashvilleMode {
+            return "Nashville"
+        }
+        return "\(currentKeyName) \(isMinorKey ? "minor" : "major")"
     }
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                mainContent
-
-                if shouldShowBanner {
-                    Divider()
-
-                    BannerAdView(adUnitID: AdMobIdentifiers.bannerAdUnitID)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .padding(.vertical, 4)
-                }
-            }
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    if isShowingABPlayback {
-                        ABTitleView()
-                    } else {
-                        MixNotesTitleView()
-                    }
-                }
-
-                if isShowingMixPlayback {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Export") {
-                            showingShareSheet = true
-                        }
-                    }
-                } else if isShowingList {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        ABModeToggleButton(isOn: $isABMode)
-                    }
-                }
-
-                if isShowingMixPlayback || isShowingABPlayback {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button {
-                            handleRecentsTapped()
-                        } label: {
-                            Image(systemName: "chevron.backward")
-                            Text("Recents")
-                        }
-                    }
-                }
-            }
-            .sheet(isPresented: $showingShareSheet) {
-                ShareSheet(activityItems: [viewModel.exportAnnotations()])
-            }
+            contentStack
         }
         .onAppear {
             libraryManager.requestAuthorization()
@@ -153,9 +288,132 @@ struct ContentView: View {
         .onReceive(viewModel.$storedAudioFiles) { files in
             abViewModel.syncStoredFiles(with: files)
         }
-        .onChange(of: isABMode) { _, newValue in
-            if !newValue {
+        .onChange(of: mode) { _, newValue in
+            if newValue != .ab {
                 abViewModel.reset()
+            }
+            if newValue != .chords {
+                chordsViewModel.reset()
+            }
+        }
+        .onChange(of: chordsViewModel.currentAnnotationIdentifier) { _, _ in
+            chordOverrides = chordsViewModel.loadChordOverrides(currentKeyIndex: currentKeyIndex)
+            normalizeChordAnnotationsForChart()
+            updateChordAnnotationsForKeyChange()
+            let slot = nextAvailableSlot(fromBar: 0, fromBeat: 0, allowHalf: isDoublePlacement)
+            nextPlacementBar = slot.bar
+            nextPlacementBeat = slot.beat
+        }
+        .onChange(of: selectedKeyIndex) { _, _ in
+            updateChordAnnotationsForKeyChange()
+        }
+        .onChange(of: isMinorKey) { _, _ in
+            updateChordAnnotationsForKeyChange()
+        }
+        .onChange(of: isNashvilleMode) { _, _ in
+            updateChordAnnotationsForKeyChange()
+        }
+        .onChange(of: isDoublePlacement) { _, newValue in
+            if newValue, let lastBar = lastPlacedBar, lastPlacedBeat == 0 {
+                let halfSlot = nextAvailableSlot(fromBar: lastBar, fromBeat: 1, allowHalf: true)
+                if halfSlot.bar == lastBar, halfSlot.beat == 1 {
+                    nextPlacementBar = halfSlot.bar
+                    nextPlacementBeat = halfSlot.beat
+                }
+            } else if !newValue, nextPlacementBeat == 1 {
+                let slot = nextAvailableSlot(fromBar: nextPlacementBar + 1, fromBeat: 0, allowHalf: false)
+                nextPlacementBar = slot.bar
+                nextPlacementBeat = slot.beat
+            }
+        }
+    }
+
+    private var contentStack: some View {
+        VStack(spacing: 0) {
+            mainContent
+
+            if shouldShowBanner {
+                Divider()
+
+                BannerAdView(adUnitID: AdMobIdentifiers.bannerAdUnitID)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .padding(.vertical, 4)
+            }
+        }
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { principalToolbarItem }
+        .toolbar { trailingToolbarItem }
+        .toolbar { leadingToolbarItem }
+        .sheet(isPresented: $showingShareSheet) {
+            ShareSheet(activityItems: [viewModel.exportAnnotations()])
+        }
+        .sheet(isPresented: $showingChordsShareSheet) {
+            ShareSheet(activityItems: [exportChordChart()])
+        }
+    }
+
+    @ViewBuilder
+    private var titleView: some View {
+        if isShowingABPlayback {
+            ABTitleView()
+        } else if isShowingChordsPlayback {
+            ChordsTitleView()
+        } else {
+            MixNotesTitleView()
+        }
+    }
+
+    private var modeToggleButtons: some View {
+        HStack(spacing: 8) {
+            ABModeToggleButton(isOn: Binding(
+                get: { mode == .ab },
+                set: { mode = $0 ? .ab : .mix }
+            ))
+            ChordsModeToggleButton(isOn: Binding(
+                get: { mode == .chords },
+                set: { mode = $0 ? .chords : .mix }
+            ))
+        }
+    }
+
+    private var principalToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            titleView
+        }
+    }
+
+    private var trailingToolbarItem: some ToolbarContent {
+        let shouldShowExport = isShowingMixPlayback
+        let shouldShowShare = isShowingChordsPlayback
+        let shouldShowModeToggle = isShowingList
+
+        return ToolbarItem(placement: .navigationBarTrailing) {
+            if shouldShowExport {
+                Button("Export") {
+                    showingShareSheet = true
+                }
+            } else if shouldShowShare {
+                Button("Share") {
+                    showingChordsShareSheet = true
+                }
+            } else if shouldShowModeToggle {
+                modeToggleButtons
+            }
+        }
+    }
+
+    private var leadingToolbarItem: some ToolbarContent {
+        let shouldShowRecents = isShowingMixPlayback || isShowingABPlayback || isShowingChordsPlayback
+        return ToolbarItem(placement: .navigationBarLeading) {
+            if shouldShowRecents {
+                Button {
+                    handleRecentsTapped()
+                } label: {
+                    Image(systemName: "chevron.backward")
+                    Text("Recents")
+                }
             }
         }
     }
@@ -171,6 +429,8 @@ struct ContentView: View {
             )
         } else if isShowingMixPlayback {
             mixPlaybackView
+        } else if isShowingChordsPlayback {
+            chordsPlaybackView
         } else {
             audioListView
         }
@@ -202,35 +462,51 @@ struct ContentView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
-            HStack(spacing: 15) {
-                Button(action: { viewModel.goToBeginning() }) {
-                    Image(systemName: "backward.end.fill")
-                }
+            GeometryReader { geometry in
+                HStack(spacing: 36) {
+                    Button(action: { viewModel.goToBeginning() }) {
+                        Image(systemName: "backward.end.fill")
+                    }
 
-                Button(action: { viewModel.goBackward(by: 3) }) {
-                    ZStack {
-                        Image(systemName: "gobackward")
-                        Text("3")
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .offset(x: 0.3, y: 1)
+                    Button(action: { viewModel.goBackward(by: 3) }) {
+                        ZStack {
+                            Image(systemName: "gobackward")
+                            Text("3")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .offset(x: 0.3, y: 1)
+                        }
+                    }
+
+                    Button(action: { viewModel.togglePlayback() }) {
+                        Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
+                            .padding(8)
+                            .background(
+                                Circle()
+                                    .stroke(Color.primary.opacity(0.8), lineWidth: 1)
+                            )
+                    }
+                    .scaleEffect(1.15)
+
+                    Button(action: { viewModel.goForward(by: 15) }) {
+                        ZStack {
+                            Image(systemName: "goforward")
+                            Text("15")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .offset(x: 0, y: 1)
+                        }
+                    }
+
+                    Button(action: { viewModel.toggleRepeat() }) {
+                        Image(systemName: "repeat")
+                            .foregroundColor(viewModel.isRepeating ? .primary : .secondary)
                     }
                 }
-
-                Button(action: { viewModel.togglePlayback() }) {
-                    Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
-                }
-
-                Button(action: { viewModel.goForward(by: 15) }) {
-                    ZStack {
-                        Image(systemName: "goforward")
-                        Text("15")
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .offset(x: 0, y: 1)
-                    }
-                }
+                .frame(width: geometry.size.width * 0.8)
+                .frame(maxWidth: .infinity)
             }
+            .frame(height: 36)
             .font(.title2)
             .buttonStyle(PlainButtonStyle())
 
@@ -353,6 +629,340 @@ struct ContentView: View {
         }
     }
 
+    private var chordsPlaybackView: some View {
+        VStack(spacing: 20) {
+            Text(chordsViewModel.currentFileName)
+                .font(.headline)
+                .foregroundColor(.primary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+                .padding(.top, -8)
+
+            GeometryReader { geometry in
+                HStack(spacing: 36) {
+                    Button(action: { chordsViewModel.goToBeginning() }) {
+                        Image(systemName: "backward.end.fill")
+                    }
+
+                    Button(action: { chordsViewModel.goBackward(by: 3) }) {
+                        ZStack {
+                            Image(systemName: "gobackward")
+                            Text("3")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .offset(x: 0.3, y: 1)
+                        }
+                    }
+
+                    Button(action: { chordsViewModel.togglePlayback() }) {
+                        Image(systemName: chordsViewModel.isPlaying ? "pause.fill" : "play.fill")
+                            .padding(8)
+                            .background(
+                                Circle()
+                                    .stroke(Color.primary.opacity(0.8), lineWidth: 1)
+                            )
+                    }
+                    .scaleEffect(1.15)
+
+                    Button(action: { chordsViewModel.goForward(by: 15) }) {
+                        ZStack {
+                            Image(systemName: "goforward")
+                            Text("15")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .offset(x: 0, y: 1)
+                        }
+                    }
+
+                    Button(action: { chordsViewModel.toggleRepeat() }) {
+                        Image(systemName: "repeat")
+                            .foregroundColor(chordsViewModel.isRepeating ? .primary : .secondary)
+                    }
+                }
+                .frame(width: geometry.size.width * 0.8)
+                .frame(maxWidth: .infinity)
+            }
+            .frame(height: 36)
+            .font(.title2)
+            .buttonStyle(PlainButtonStyle())
+
+            HStack(spacing: 12) {
+                Text(timeString(from: chordsViewModel.currentTime))
+                    .font(.title3)
+                    .monospacedDigit()
+                    .foregroundColor(.primary)
+
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(height: 2)
+
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.6))
+                            .frame(width: geometry.size.width * chordsViewModel.progress, height: 2)
+
+                        Rectangle()
+                            .fill(Color.black)
+                            .frame(width: 2, height: 12)
+                            .offset(x: geometry.size.width * chordsViewModel.progress - 1)
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                let progress = max(0, min(1, value.location.x / geometry.size.width))
+                                chordsViewModel.currentTime = progress * chordsViewModel.duration
+                                chordsViewModel.progress = progress
+                            }
+                            .onEnded { value in
+                                let progress = max(0, min(1, value.location.x / geometry.size.width))
+                                chordsViewModel.seek(to: progress)
+                            }
+                    )
+                }
+                .frame(height: 12)
+
+                Text(timeString(from: chordsViewModel.duration))
+                    .font(.title3)
+                    .monospacedDigit()
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, -10)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Key")
+                        .font(.headline)
+                    Text(currentKeyDisplayName)
+                        .font(.headline)
+                    Spacer()
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            isMinorKey.toggle()
+                        }
+                    } label: {
+                        Text("Minor")
+                            .font(.custom("LeagueSpartan-Bold", size: 14))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(isMinorKey ? Color.black : Color(.systemGray5))
+                            .foregroundColor(isMinorKey ? .white : .primary)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                .stroke(Color.black, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isNashvilleMode)
+                    .opacity(isNashvilleMode ? 0.5 : 1)
+
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            isNashvilleMode.toggle()
+                        }
+                    } label: {
+                        Text("Nashville")
+                            .font(.custom("LeagueSpartan-Bold", size: 14))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(isNashvilleMode ? Color.black : Color(.systemGray5))
+                            .foregroundColor(isNashvilleMode ? .white : .primary)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(Color.black, lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                GeometryReader { geometry in
+                    Slider(value: $selectedKeyIndex, in: 0...Double(keyNames.count - 1), step: 1)
+                        .frame(width: geometry.size.width * 0.9)
+                        .frame(maxWidth: .infinity)
+                }
+                .frame(height: 24)
+            }
+            .padding(.horizontal)
+
+            LazyVGrid(columns: chordColumns, spacing: 10) {
+                ForEach(chordFormulas.indices, id: \.self) { index in
+                    let label = chordLabel(for: chordFormulas[index], index: index)
+                    let isSecondRow = index >= majorChordsRow1.count
+                    Button {
+                        if isEditMode {
+                            guard isSecondRow else { return }
+                            editingChordIndex = index
+                            editingChordText = label
+                        } else {
+                            let slot = nextAvailableSlot(
+                                fromBar: nextPlacementBar,
+                                fromBeat: nextPlacementBeat,
+                                allowHalf: isDoublePlacement
+                            )
+                            chordsViewModel.addAnnotation(
+                                .custom,
+                                customText: label,
+                                chordIndex: index,
+                                barIndex: slot.bar,
+                                beatIndex: slot.beat
+                            )
+                            let nextSlot = nextAvailableSlot(
+                                fromBar: slot.bar,
+                                fromBeat: slot.beat + 1,
+                                allowHalf: isDoublePlacement
+                            )
+                            nextPlacementBar = nextSlot.bar
+                            nextPlacementBeat = nextSlot.beat
+                            lastPlacedBar = slot.bar
+                            lastPlacedBeat = slot.beat
+                        }
+                    } label: {
+                        Text(label)
+                            .font(.custom("LeagueSpartan-Bold", size: 12))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(Color(.systemGray6))
+                            .foregroundColor(.primary)
+                            .cornerRadius(6)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal)
+            .alert("Edit Chord", isPresented: Binding(
+                get: { editingChordIndex != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        editingChordIndex = nil
+                        editingChordText = ""
+                    }
+                }
+            )) {
+                TextField("Chord label", text: $editingChordText)
+                Button("Cancel", role: .cancel) {
+                    editingChordIndex = nil
+                    editingChordText = ""
+                }
+                Button("Save") {
+                    if let index = editingChordIndex {
+                        let trimmed = editingChordText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmed.isEmpty {
+                            chordOverrides.removeValue(forKey: index)
+                        } else {
+                            chordOverrides[index] = AudioAnnotationViewModel.ChordOverride(
+                                label: trimmed,
+                                keyIndex: currentKeyIndex
+                            )
+                        }
+                        chordsViewModel.saveChordOverrides(chordOverrides)
+                        updateChordAnnotationsForKeyChange()
+                    }
+                    editingChordIndex = nil
+                    editingChordText = ""
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    deleteLastChordAnnotation()
+                } label: {
+                    Text("Delete")
+                        .font(.custom("LeagueSpartan-Bold", size: 14))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color(.systemGray5))
+                        .foregroundColor(.primary)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    addSkippedBar()
+                } label: {
+                    Text("Skip")
+                        .font(.custom("LeagueSpartan-Bold", size: 14))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color(.systemGray5))
+                        .foregroundColor(.primary)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        isDoublePlacement.toggle()
+                    }
+                } label: {
+                    Text("Double")
+                        .font(.custom("LeagueSpartan-Bold", size: 14))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(isDoublePlacement ? Color.black : Color(.systemGray5))
+                        .foregroundColor(isDoublePlacement ? .white : .primary)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        isEditMode.toggle()
+                    }
+                } label: {
+                    Text("Edit")
+                        .font(.custom("LeagueSpartan-Bold", size: 14))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(isEditMode ? Color.black : Color(.systemGray5))
+                        .foregroundColor(isEditMode ? .white : .primary)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Chord Chart")
+                    .font(.headline)
+                    .padding(.horizontal)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(0..<chordChartLineCount, id: \.self) { line in
+                            chordChartLineView(line)
+                                .padding(.horizontal)
+                        }
+                    }
+                }
+                .frame(maxHeight: 260)
+            }
+        }
+    }
+
     @ViewBuilder
     private var audioListView: some View {
         List {
@@ -371,8 +981,10 @@ struct ContentView: View {
                         .padding(.vertical, 4)
                 } else {
                     ForEach(viewModel.storedAudioFiles.sorted(by: { $0.dateAdded > $1.dateAdded })) { storedFile in
-                        if isABMode {
+                        if mode == .ab {
                             abSelectionRow(for: storedFile)
+                        } else if mode == .chords {
+                            chordsStoredFileRow(for: storedFile)
                         } else {
                             mixStoredFileRow(for: storedFile)
                         }
@@ -383,7 +995,7 @@ struct ContentView: View {
                     .font(.headline)
             }
 
-            if isABMode {
+            if mode == .ab {
                 ABMusicLibrarySection(
                     libraryManager: libraryManager,
                     slotForSong: abViewModel.slot(for:)
@@ -391,6 +1003,10 @@ struct ContentView: View {
                     withAnimation(abSelectionAnimation) {
                         abViewModel.selectLibrarySong(song)
                     }
+                }
+            } else if mode == .chords {
+                MusicLibrarySection(libraryManager: libraryManager) { song in
+                    chordsViewModel.loadLibrarySong(song)
                 }
             } else {
                 MusicLibrarySection(libraryManager: libraryManager) { song in
@@ -428,7 +1044,41 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
-                viewModel.deleteStoredFile(storedFile)
+                deleteStoredFile(storedFile)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
+
+    private func chordsStoredFileRow(for storedFile: StoredAudioFile) -> some View {
+        Button {
+            chordsViewModel.loadStoredAudio(storedFile)
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(storedFile.displayName)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Text("Added: \(storedFile.formattedDate)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(storedFile.formattedDuration)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                deleteStoredFile(storedFile)
             } label: {
                 Label("Delete", systemImage: "trash")
             }
@@ -472,7 +1122,7 @@ struct ContentView: View {
         }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
-                viewModel.deleteStoredFile(storedFile)
+                deleteStoredFile(storedFile)
             } label: {
                 Label("Delete", systemImage: "trash")
             }
@@ -492,9 +1142,11 @@ struct ContentView: View {
     private func handleRecentsTapped() {
         if isShowingABPlayback {
             abViewModel.reset()
+        } else if isShowingChordsPlayback {
+            chordsViewModel.reset()
         } else {
             viewModel.reset()
-            isABMode = false
+            mode = .mix
         }
     }
 
@@ -508,6 +1160,511 @@ struct ContentView: View {
         }
 
         return !viewModel.storedAudioFiles.isEmpty
+    }
+
+    private func deleteStoredFile(_ storedFile: StoredAudioFile) {
+        viewModel.deleteStoredFile(storedFile)
+        chordsViewModel.deleteAnnotations(for: storedFile)
+    }
+
+    private func chordLabel(for formula: ChordFormula, index: Int) -> String {
+        if let override = chordOverrides[index] {
+            return transposedOverrideLabel(override)
+        }
+        switch keyLabelMode {
+        case .notes:
+            let baseIndex = min(max(Int(selectedKeyIndex), 0), keyNames.count - 1)
+            let rootIndex = (baseIndex + formula.offset) % keyNames.count
+            return keyNames[rootIndex] + formula.quality.suffix
+        case .nashville:
+            return nashvilleLabel(for: formula)
+        }
+    }
+
+    private func transposedOverrideLabel(_ override: AudioAnnotationViewModel.ChordOverride) -> String {
+        if keyLabelMode == .nashville {
+            return nashvilleLabelFromChordLabel(override.label, sourceKeyIndex: override.keyIndex)
+        }
+        let maxKeyIndex = keyNames.count - 1
+        guard override.keyIndex >= 0,
+              override.keyIndex < maxKeyIndex,
+              currentKeyIndex < maxKeyIndex
+        else {
+            return override.label
+        }
+
+        let shift = currentKeyIndex - override.keyIndex
+        return transposeChordLabel(override.label, by: shift)
+    }
+
+    private func nashvilleLabelFromChordLabel(_ label: String, sourceKeyIndex: Int) -> String {
+        let shift = currentKeyIndex - sourceKeyIndex
+        let transposedLabel = transposeChordLabel(label, by: shift)
+        let parts = transposedLabel.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let rootPart = nashvillePart(from: String(parts[0]), includeRemainder: true) else {
+            return label
+        }
+        if parts.count == 2, let bassPart = nashvillePart(from: String(parts[1]), includeRemainder: false) {
+            return "\(rootPart)/\(bassPart)"
+        }
+        return rootPart
+    }
+
+    private func nashvillePart(from part: String, includeRemainder: Bool) -> String? {
+        guard let first = part.first, "ABCDEFG".contains(first) else { return nil }
+        var index = part.startIndex
+        let rootLetter = String(part[index])
+        index = part.index(after: index)
+
+        var accidental = ""
+        if index < part.endIndex {
+            let char = part[index]
+            if char == "#" || char == "b" {
+                accidental = String(char)
+                index = part.index(after: index)
+            }
+        }
+
+        let rootToken = rootLetter + accidental
+        guard let semitone = noteSemitone(rootToken) else { return nil }
+        let keySemitone = noteSemitone(currentKeyName) ?? currentKeyIndex
+        let offset = (semitone - keySemitone + 12) % 12
+        let degree = nashvilleDegree(for: offset)
+        if includeRemainder {
+            let remainder = String(part[index...])
+            return degree + remainder
+        }
+        return degree
+    }
+
+    private func nashvilleDegree(for semitoneOffset: Int) -> String {
+        switch semitoneOffset {
+        case 0: return "1"
+        case 2: return "2"
+        case 4: return "3"
+        case 5: return "4"
+        case 7: return "5"
+        case 9: return "6"
+        case 11: return "7"
+        default: return "?"
+        }
+    }
+
+    private func transposeChordLabel(_ label: String, by shift: Int) -> String {
+        guard shift != 0 else { return label }
+        let parts = label.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let transposedRoot = transposeChordPart(String(parts[0]), by: shift) else {
+            return label
+        }
+        if parts.count == 2, let transposedBass = transposeChordPart(String(parts[1]), by: shift) {
+            return "\(transposedRoot)/\(transposedBass)"
+        }
+        return transposedRoot
+    }
+
+    private func transposeChordPart(_ part: String, by shift: Int) -> String? {
+        guard let first = part.first, "ABCDEFG".contains(first) else { return nil }
+        var index = part.startIndex
+        let rootLetter = String(part[index])
+        index = part.index(after: index)
+
+        var accidental = ""
+        if index < part.endIndex {
+            let char = part[index]
+            if char == "#" || char == "b" {
+                accidental = String(char)
+                index = part.index(after: index)
+            }
+        }
+
+        let rootToken = rootLetter + accidental
+        guard let semitone = noteSemitone(rootToken) else { return nil }
+        let transposed = noteName(for: semitone + shift)
+        let remainder = String(part[index...])
+        return transposed + remainder
+    }
+
+    private func noteSemitone(_ note: String) -> Int? {
+        switch note {
+        case "C": return 0
+        case "C#": return 1
+        case "Db": return 1
+        case "D": return 2
+        case "D#": return 3
+        case "Eb": return 3
+        case "E": return 4
+        case "F": return 5
+        case "F#": return 6
+        case "Gb": return 6
+        case "G": return 7
+        case "G#": return 8
+        case "Ab": return 8
+        case "A": return 9
+        case "A#": return 10
+        case "Bb": return 10
+        case "B": return 11
+        default: return nil
+        }
+    }
+
+    private func noteName(for semitone: Int) -> String {
+        let names = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+        let index = ((semitone % 12) + 12) % 12
+        return names[index]
+    }
+
+    private func nashvilleLabel(for formula: ChordFormula) -> String {
+        let degree: String
+        switch formula.offset {
+        case 0: degree = "1"
+        case 2: degree = "2"
+        case 4: degree = "3"
+        case 5: degree = "4"
+        case 7: degree = "5"
+        case 9: degree = "6"
+        case 11: degree = "7"
+        default: degree = "?"
+        }
+
+        switch formula.quality {
+        case .major:
+            return degree
+        case .minor:
+            return "\(degree)m"
+        case .diminished:
+            return "\(degree)dim"
+        case .dominant7:
+            return "\(degree)7"
+        case .major7:
+            return "\(degree)maj7"
+        case .minor7:
+            return "\(degree)m7"
+        case .add9:
+            return "\(degree)add9"
+        }
+    }
+
+    private func updateChordAnnotationsForKeyChange() {
+        guard chordsViewModel.hasLoadedAudio else { return }
+        let updated = chordsViewModel.annotations.map { annotation in
+            guard let index = annotation.chordIndex else { return annotation }
+            guard index >= 0 && index < chordFormulas.count else { return annotation }
+            let label = chordLabel(for: chordFormulas[index], index: index)
+            return AudioAnnotation(
+                id: annotation.id,
+                timestamp: annotation.timestamp,
+                type: annotation.type,
+                customText: label,
+                chordIndex: annotation.chordIndex,
+                barIndex: annotation.barIndex,
+                beatIndex: annotation.beatIndex
+            )
+        }
+        chordsViewModel.replaceAnnotations(updated)
+    }
+
+    private func normalizeChordAnnotationsForChart() {
+        guard chordsViewModel.hasLoadedAudio else { return }
+        var updated = chordsViewModel.annotations
+        var usedSlots = Set<String>()
+        var nextBar = 0
+        var didChange = false
+
+        for index in updated.indices {
+            guard updated[index].chordIndex != nil else { continue }
+            let bar = updated[index].barIndex
+            let beat = updated[index].beatIndex
+            if let bar, let beat {
+                let clampedBeat = min(max(beat, 0), beatsPerBar - 1)
+                if clampedBeat != beat {
+                    let annotation = updated[index]
+                    updated[index] = AudioAnnotation(
+                        id: annotation.id,
+                        timestamp: annotation.timestamp,
+                        type: annotation.type,
+                        customText: annotation.customText,
+                        chordIndex: annotation.chordIndex,
+                        barIndex: bar,
+                        beatIndex: clampedBeat
+                    )
+                    didChange = true
+                }
+                usedSlots.insert(slotKey(bar: bar, beat: clampedBeat))
+                continue
+            }
+
+            while usedSlots.contains(slotKey(bar: nextBar, beat: 0)) {
+                nextBar += 1
+            }
+
+            let annotation = updated[index]
+            updated[index] = AudioAnnotation(
+                id: annotation.id,
+                timestamp: annotation.timestamp,
+                type: annotation.type,
+                customText: annotation.customText,
+                chordIndex: annotation.chordIndex,
+                barIndex: nextBar,
+                beatIndex: 0
+            )
+            usedSlots.insert(slotKey(bar: nextBar, beat: 0))
+            nextBar += 1
+            didChange = true
+        }
+
+        if didChange {
+            chordsViewModel.replaceAnnotations(updated)
+        }
+    }
+
+    private func nextAvailableSlot(fromBar: Int, fromBeat: Int, allowHalf: Bool) -> (bar: Int, beat: Int) {
+        let usedSlots = Set(chordsViewModel.annotations.compactMap { annotation -> String? in
+            guard let bar = annotation.barIndex, let beat = annotation.beatIndex else { return nil }
+            return slotKey(bar: bar, beat: beat)
+        })
+
+        let beatOptions = allowHalf ? [0, 1] : [0]
+        var bar = max(fromBar, 0)
+        var beatIndex = fromBeat
+
+        while bar <= chordChartBars + 50 {
+            for beat in beatOptions {
+                if bar == fromBar, beat < beatIndex {
+                    continue
+                }
+                if !usedSlots.contains(slotKey(bar: bar, beat: beat)) {
+                    return (bar, beat)
+                }
+            }
+            bar += 1
+            beatIndex = 0
+        }
+
+        return (chordChartBars, 0)
+    }
+
+    private func chordBarView(bar: Int, beatWidth: CGFloat, beatSpacing: CGFloat, barWidth: CGFloat) -> some View {
+        HStack(spacing: beatSpacing) {
+            ForEach(0..<beatsPerBar, id: \.self) { beat in
+                chordBeatSlotView(bar: bar, beat: beat, width: beatWidth)
+            }
+        }
+        .padding(.horizontal, 6)
+        .frame(width: barWidth, alignment: .leading)
+    }
+
+    private func chordBeatSlotView(bar: Int, beat: Int, width: CGFloat) -> some View {
+        let annotation = chordAnnotation(for: bar, beat: beat)
+
+        return ZStack {
+            if let annotation, let label = annotation.customText {
+                HStack(spacing: 2) {
+                    Text(label)
+                        .font(.custom("LeagueSpartan-Bold", size: 12))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                }
+                .padding(.horizontal, 4)
+                .onDrag {
+                    NSItemProvider(object: annotation.id.uuidString as NSString)
+                }
+            }
+        }
+        .frame(width: width, height: 28)
+        .contentShape(Rectangle())
+        .onDrop(of: [UTType.text], isTargeted: nil) { providers in
+            handleChordDrop(providers: providers, bar: bar, beat: beat)
+        }
+        .contextMenu {
+            if let annotation {
+                Button(role: .destructive) {
+                    chordsViewModel.deleteAnnotation(annotation)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    private func chordAnnotation(for bar: Int, beat: Int) -> AudioAnnotation? {
+        chordsViewModel.annotations.first { annotation in
+            annotation.barIndex == bar && annotation.beatIndex == beat
+        }
+    }
+
+    private func chordChartLineView(_ line: Int) -> some View {
+        let bars = barsForLine(line)
+
+        return GeometryReader { geometry in
+            let barCount = max(bars.count, 1)
+            let barlineWidth: CGFloat = 2
+            let beatSpacing: CGFloat = 8
+            let totalBarlineWidth = barlineWidth * CGFloat(barCount + 1)
+            let availableWidth = max(geometry.size.width - totalBarlineWidth, 0)
+            let barWidth = availableWidth / CGFloat(barCount)
+            let beatWidth = max(20, (barWidth - (beatSpacing * CGFloat(beatsPerBar - 1)) - 12) / CGFloat(beatsPerBar))
+
+            HStack(spacing: 0) {
+                barline
+                ForEach(bars, id: \.self) { bar in
+                    chordBarView(bar: bar, beatWidth: beatWidth, beatSpacing: beatSpacing, barWidth: barWidth)
+                    barline
+                }
+            }
+            .frame(width: geometry.size.width, alignment: .leading)
+        }
+        .frame(height: 32)
+    }
+
+    private var barline: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.7))
+            .frame(width: 2)
+    }
+
+    private var chordChartLineCount: Int {
+        Int(ceil(Double(chordChartBars) / Double(barsPerLine)))
+    }
+
+    private func barsForLine(_ line: Int) -> [Int] {
+        let start = line * barsPerLine
+        let end = min(start + barsPerLine, chordChartBars)
+        return start < end ? Array(start..<end) : []
+    }
+
+    private func deleteLastChordAnnotation() {
+        let sorted = chordsViewModel.annotations.sorted { lhs, rhs in
+            let lhsBar = lhs.barIndex ?? -1
+            let rhsBar = rhs.barIndex ?? -1
+            if lhsBar != rhsBar {
+                return lhsBar > rhsBar
+            }
+            let lhsBeat = lhs.beatIndex ?? -1
+            let rhsBeat = rhs.beatIndex ?? -1
+            if lhsBeat != rhsBeat {
+                return lhsBeat > rhsBeat
+            }
+            return lhs.timestamp > rhs.timestamp
+        }
+
+        if let last = sorted.first {
+            chordsViewModel.deleteAnnotation(last)
+            if let bar = last.barIndex, let beat = last.beatIndex {
+                nextPlacementBar = bar
+                nextPlacementBeat = beat
+                lastPlacedBar = bar
+                lastPlacedBeat = beat
+            }
+        }
+    }
+
+    private func addSkippedBar() {
+        let slot = nextAvailableSlot(
+            fromBar: nextPlacementBar,
+            fromBeat: nextPlacementBeat,
+            allowHalf: isDoublePlacement
+        )
+        chordsViewModel.addAnnotation(
+            .custom,
+            customText: nil,
+            chordIndex: nil,
+            barIndex: slot.bar,
+            beatIndex: slot.beat
+        )
+        let nextSlot = nextAvailableSlot(
+            fromBar: slot.bar,
+            fromBeat: slot.beat + 1,
+            allowHalf: isDoublePlacement
+        )
+        nextPlacementBar = nextSlot.bar
+        nextPlacementBeat = nextSlot.beat
+        lastPlacedBar = slot.bar
+        lastPlacedBeat = slot.beat
+    }
+
+    private func exportChordChart() -> String {
+        let header = "Chord Chart - \(currentKeyDisplayName)"
+        let totalBars = max(1, chordChartBars)
+        let barCountPerLine = barsPerLine
+        var lines: [String] = [header, ""]
+
+        let annotationsBySlot = Dictionary(
+            chordsViewModel.annotations.compactMap { annotation -> (BarBeatSlot, String)? in
+                guard let bar = annotation.barIndex, let beat = annotation.beatIndex else { return nil }
+                let label = annotation.customText ?? ""
+                return (BarBeatSlot(bar: bar, beat: beat), label)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        let barLabelWidth = 6
+        let beatSpacing = " "
+        let barPadding = " "
+        let beatSlots = beatsPerBar
+
+        let lineCount = Int(ceil(Double(totalBars) / Double(barCountPerLine)))
+        for line in 0..<lineCount {
+            let start = line * barCountPerLine
+            let end = min(start + barCountPerLine, totalBars)
+            var lineText = "|"
+            for bar in start..<end {
+                var barParts: [String] = []
+                for beat in 0..<beatSlots {
+                    let label = annotationsBySlot[BarBeatSlot(bar: bar, beat: beat)] ?? ""
+                    let padded = label.padding(toLength: barLabelWidth, withPad: " ", startingAt: 0)
+                    barParts.append(padded)
+                }
+                lineText += barPadding + barParts.joined(separator: beatSpacing) + barPadding + "|"
+            }
+            lines.append(lineText)
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+
+    private func handleChordDrop(providers: [NSItemProvider], bar: Int, beat: Int) -> Bool {
+        guard let provider = providers.first else { return false }
+        let typeIdentifier = UTType.text.identifier
+        provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, _ in
+            var idString: String?
+            if let data = item as? Data {
+                idString = String(data: data, encoding: .utf8)
+            } else if let string = item as? String {
+                idString = string
+            } else if let nsString = item as? NSString {
+                idString = nsString as String
+            }
+
+            guard let idString, let id = UUID(uuidString: idString) else { return }
+            DispatchQueue.main.async {
+                moveChordAnnotation(id: id, to: bar, beat: beat)
+            }
+        }
+        return true
+    }
+
+    private func moveChordAnnotation(id: UUID, to bar: Int, beat: Int) {
+        var updated = chordsViewModel.annotations
+        updated.removeAll { $0.id != id && $0.barIndex == bar && $0.beatIndex == beat }
+        if let index = updated.firstIndex(where: { $0.id == id }) {
+            let annotation = updated[index]
+            updated[index] = AudioAnnotation(
+                id: annotation.id,
+                timestamp: annotation.timestamp,
+                type: annotation.type,
+                customText: annotation.customText,
+                chordIndex: annotation.chordIndex,
+                barIndex: bar,
+                beatIndex: beat
+            )
+            chordsViewModel.replaceAnnotations(updated)
+        }
+    }
+
+    private func slotKey(bar: Int, beat: Int) -> String {
+        "\(bar)-\(beat)"
     }
 
     private func openSharedDocuments() {
