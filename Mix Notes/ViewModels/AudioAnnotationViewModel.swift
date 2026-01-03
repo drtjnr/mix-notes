@@ -18,8 +18,12 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     @Published var isLoadingFromBrowse: Bool = false
     @Published var currentLibrarySong: LibrarySong?
     @Published private(set) var currentAnnotationIdentifier: String?
-    @Published var isRepeating: Bool = false
-    
+
+    let repeatStateManager = RepeatStateManager.shared
+    var isRepeating: Bool {
+        repeatStateManager.isRepeating
+    }
+
     private var audioPlayer: AVAudioPlayer?
     private var libraryPlayer: AVQueuePlayer?
     private var libraryItemDidEndObserver: NSObjectProtocol?
@@ -223,7 +227,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     }
 
     func toggleRepeat() {
-        isRepeating.toggle()
+        repeatStateManager.isRepeating.toggle()
         applyRepeatSettingToPlayers()
     }
     

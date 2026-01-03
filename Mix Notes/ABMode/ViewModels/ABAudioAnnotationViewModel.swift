@@ -88,6 +88,11 @@ final class ABAudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlaye
     @Published var hideCurrentFileName = false
     @Published var activeSlot: AudioSlot?
 
+    let repeatStateManager = RepeatStateManager.shared
+    var isRepeating: Bool {
+        repeatStateManager.isRepeating
+    }
+
     // MARK: - Private Properties
 
     private var slotPlayers: [AudioSlot: AVAudioPlayer] = [:]
@@ -200,6 +205,13 @@ final class ABAudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlaye
         let newTime = duration * max(0, min(1, progress))
         let wasPlaying = isPlaying
         syncPlayers(to: newTime, restartPlayback: wasPlaying)
+    }
+
+    func toggleRepeat() {
+        repeatStateManager.isRepeating.toggle()
+        for player in slotPlayers.values {
+            player.numberOfLoops = isRepeating ? -1 : 0
+        }
     }
 
     func reset() {
@@ -381,7 +393,7 @@ final class ABAudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlaye
         do {
             let player = try AVAudioPlayer(contentsOf: url)
             player.delegate = self
-            player.numberOfLoops = 0
+            player.numberOfLoops = isRepeating ? -1 : 0
             player.currentTime = min(currentTime, player.duration)
             player.volume = slot == activeSlot ? 1.0 : 0.0
             slotPlayers[slot]?.stop()

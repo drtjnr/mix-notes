@@ -6,10 +6,10 @@ struct ABPlaybackView: View {
     private let abButtonAnimation = Animation.spring(response: 0.3, dampingFraction: 0.7)
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             // Invisible spacer to preserve layout above controls
             Text("Filename spacer")
-                .font(.headline)
+                .font(MixNotesDesign.sfFont(17, weight: .medium))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
                 .opacity(0)
@@ -17,95 +17,122 @@ struct ABPlaybackView: View {
             playbackControls
                 .padding(.top, 4)
 
-            Spacer(minLength: 16)
+            Spacer(minLength: 14)
 
             abSwitch
 
             if !viewModel.currentFileName.isEmpty {
                 Text(viewModel.currentFileName)
-                    .font(.headline)
-                    .foregroundColor(viewModel.hideCurrentFileName ? .white : .black)
+                    .font(MixNotesDesign.sfFont(16, weight: .medium))
+                    .foregroundColor(viewModel.hideCurrentFileName ? MixNotesDesign.cream : MixNotesDesign.charcoal)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
                     .animation(abButtonAnimation, value: viewModel.hideCurrentFileName)
             }
 
-            Button(viewModel.hideCurrentFileName ? "Show" : "Hide") {
+            Button {
                 withAnimation(abButtonAnimation) {
                     viewModel.toggleFilenameVisibility()
                 }
+            } label: {
+                Text(viewModel.hideCurrentFileName ? "Show" : "Hide")
+                    .font(MixNotesDesign.sfFont(15))
+                    .foregroundColor(MixNotesDesign.charcoal)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 7)
+                    .background(MixNotesDesign.cream)
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(MixNotesDesign.charcoal.opacity(0.3), lineWidth: 1)
+                    )
             }
-            .buttonStyle(.bordered)
-            .padding(.top, 4)
+            .buttonStyle(.plain)
+            .padding(.top, 2)
 
             Spacer(minLength: 0)
 
-            Divider()
+            Rectangle()
+                .fill(MixNotesDesign.lightTaupe)
+                .frame(height: 1)
 
             BannerAdView(adUnitID: adUnitID)
                 .frame(maxWidth: .infinity)
                 .frame(height: 50)
                 .padding(.vertical, 4)
         }
+        .background(MixNotesDesign.cream)
     }
 
     private var playbackControls: some View {
-        VStack(spacing: 20) {
-            // Playback controls
-            HStack(spacing: 15) {
-                Button(action: { viewModel.goToBeginning() }) {
-                    Image(systemName: "backward.end.fill")
-                }
+        VStack(spacing: 16) {
+            GeometryReader { geometry in
+                HStack(spacing: 34) {
+                    Button(action: { viewModel.goToBeginning() }) {
+                        Image(systemName: "backward.end.fill")
+                    }
 
-                Button(action: { viewModel.goBackward(by: 3) }) {
-                    ZStack {
-                        Image(systemName: "gobackward")
-                        Text("3")
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .offset(x: 0.3, y: 1)
+                    Button(action: { viewModel.goBackward(by: 3) }) {
+                        ZStack {
+                            Image(systemName: "gobackward")
+                            Text("3")
+                                .font(.system(size: 10, weight: .bold))
+                                .offset(x: 0.3, y: 1)
+                        }
+                    }
+
+                    Button(action: { viewModel.togglePlayback() }) {
+                        Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
+                            .padding(8)
+                            .background(
+                                Circle()
+                                    .stroke(MixNotesDesign.charcoal.opacity(0.6), lineWidth: 1)
+                            )
+                    }
+                    .scaleEffect(1.15)
+
+                    Button(action: { viewModel.goForward(by: 15) }) {
+                        ZStack {
+                            Image(systemName: "goforward")
+                            Text("15")
+                                .font(.system(size: 10, weight: .bold))
+                                .offset(x: 0, y: 1)
+                        }
+                    }
+
+                    Button(action: { viewModel.toggleRepeat() }) {
+                        Image(systemName: "repeat")
+                            .foregroundColor(viewModel.isRepeating ? MixNotesDesign.charcoal : MixNotesDesign.warmGray)
                     }
                 }
-
-                Button(action: { viewModel.togglePlayback() }) {
-                    Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
-                }
-
-                Button(action: { viewModel.goForward(by: 15) }) {
-                    ZStack {
-                        Image(systemName: "goforward")
-                        Text("15")
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .offset(x: 0, y: 1)
-                    }
-                }
+                .foregroundColor(MixNotesDesign.charcoal)
+                .frame(width: geometry.size.width * 0.8)
+                .frame(maxWidth: .infinity)
             }
+            .frame(height: 34)
             .font(.title2)
             .buttonStyle(PlainButtonStyle())
 
-            // Current playback time display
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Text(timeString(from: viewModel.currentTime))
-                    .font(.title3)
+                    .font(MixNotesDesign.sfFont(16))
                     .monospacedDigit()
-                    .foregroundColor(.primary)
+                    .foregroundColor(MixNotesDesign.charcoal)
 
-                // Progress bar
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Rectangle()
-                            .fill(Color.gray.opacity(0.3))
-                            .frame(height: 2)
+                            .fill(MixNotesDesign.lightTaupe)
+                            .frame(height: 1)
 
                         Rectangle()
-                            .fill(Color.gray.opacity(0.6))
-                            .frame(width: geometry.size.width * viewModel.progress, height: 2)
+                            .fill(MixNotesDesign.mediumTaupe)
+                            .frame(width: geometry.size.width * viewModel.progress, height: 1)
 
-                        Rectangle()
-                            .fill(Color.black)
-                            .frame(width: 2, height: 12)
-                            .offset(x: geometry.size.width * viewModel.progress - 1)
+                        Circle()
+                            .fill(MixNotesDesign.charcoal)
+                            .frame(width: 8, height: 8)
+                            .offset(x: geometry.size.width * viewModel.progress - 4)
                     }
                     .contentShape(Rectangle())
                     .gesture(
@@ -121,15 +148,15 @@ struct ABPlaybackView: View {
                             }
                     )
                 }
-                .frame(height: 12)
+                .frame(height: 10)
 
                 Text(timeString(from: viewModel.duration))
-                    .font(.title3)
+                    .font(MixNotesDesign.sfFont(16))
                     .monospacedDigit()
-                    .foregroundColor(.secondary)
+                    .foregroundColor(MixNotesDesign.warmGray)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, -10)
+            .padding(.horizontal, 24)
+            .padding(.top, -8)
         }
     }
 
@@ -138,16 +165,16 @@ struct ABPlaybackView: View {
             viewModel.toggleActiveSlot()
         } label: {
             Text("ab")
-                .font(.custom("LeagueSpartan-Bold", size: 34))
-                .foregroundColor(viewModel.activeSlot?.isInvertedAppearance == true ? .white : .black)
-                .frame(width: 140, height: 140)
+                .font(.custom("LeagueSpartan-Bold", size: 32))
+                .foregroundColor(viewModel.activeSlot?.isInvertedAppearance == true ? MixNotesDesign.cream : MixNotesDesign.charcoal)
+                .frame(width: 130, height: 130)
                 .background(
                     Circle()
-                        .fill(viewModel.activeSlot?.isInvertedAppearance == true ? Color.black : Color.white)
+                        .fill(viewModel.activeSlot?.isInvertedAppearance == true ? MixNotesDesign.charcoal : MixNotesDesign.cream)
                 )
                 .overlay(
                     Circle()
-                        .stroke(Color.black, lineWidth: 3)
+                        .stroke(MixNotesDesign.charcoal, lineWidth: 2)
                 )
         }
         .buttonStyle(.plain)

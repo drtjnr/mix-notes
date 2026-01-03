@@ -20,14 +20,31 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 struct Mix_NotesApp: App {
     @StateObject private var viewModel = AudioAnnotationViewModel()
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
+    @State private var isLoading = true
+
     var body: some Scene {
         WindowGroup {
-            ContentView(viewModel: viewModel)
-                .onOpenURL { url in
-                    // Handle incoming URLs (from Messages, Files app, etc.)
-                    handleIncomingURL(url)
+            ZStack {
+                ContentView(viewModel: viewModel)
+                    .onOpenURL { url in
+                        // Handle incoming URLs (from Messages, Files app, etc.)
+                        handleIncomingURL(url)
+                    }
+                    .opacity(isLoading ? 0 : 1)
+
+                if isLoading {
+                    LaunchScreenView()
+                        .transition(.opacity)
                 }
+            }
+            .onAppear {
+                // Show launch screen for a brief moment
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        isLoading = false
+                    }
+                }
+            }
         }
     }
     

@@ -16,29 +16,34 @@ struct MusicLibrarySection: View {
                 accessDeniedContent
             case .restricted:
                 Text("Music library access is restricted on this device.")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
+                    .font(MixNotesDesign.sfItalic(14))
+                    .foregroundColor(MixNotesDesign.warmGray)
                     .padding(.vertical, 4)
+                    .listRowBackground(MixNotesDesign.cream)
             case .notDetermined:
                 requestAccessContent
             @unknown default:
                 Text("Music library access is unavailable.")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
+                    .font(MixNotesDesign.sfItalic(14))
+                    .foregroundColor(MixNotesDesign.warmGray)
                     .padding(.vertical, 4)
+                    .listRowBackground(MixNotesDesign.cream)
             }
         } header: {
             HStack {
-                Text("Recently Added Songs")
-                    .font(.headline)
+                Text("From Apple Music")
+                    .font(MixNotesDesign.sfFont(17, weight: .medium))
+                    .foregroundColor(MixNotesDesign.charcoal)
+                    .textCase(nil)
                 Spacer()
                 if libraryManager.isRefreshing {
                     ProgressView()
-                        .scaleEffect(0.75, anchor: .center)
+                        .scaleEffect(0.7, anchor: .center)
+                        .tint(MixNotesDesign.charcoal)
                 } else if let lastUpdated = libraryManager.lastUpdated {
                     Text("Updated \(lastUpdated.formatted(date: .omitted, time: .shortened))")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .font(MixNotesDesign.sfFont(12))
+                        .foregroundColor(MixNotesDesign.warmGray)
                 }
             }
         }
@@ -52,13 +57,16 @@ struct MusicLibrarySection: View {
                     Spacer()
                     ProgressView("Loading songs…")
                         .progressViewStyle(.circular)
+                        .tint(MixNotesDesign.charcoal)
                     Spacer()
                 }
+                .listRowBackground(MixNotesDesign.cream)
             } else {
                 Text("No on-device songs were found in your Music library.")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
+                    .font(MixNotesDesign.sfItalic(14))
+                    .foregroundColor(MixNotesDesign.warmGray)
                     .padding(.vertical, 4)
+                    .listRowBackground(MixNotesDesign.cream)
             }
         } else {
             ForEach(libraryManager.songs) { song in
@@ -68,6 +76,7 @@ struct MusicLibrarySection: View {
                     MusicLibraryRow(song: song)
                 }
                 .buttonStyle(.plain)
+                .listRowBackground(MixNotesDesign.cream)
             }
         }
     }
@@ -75,27 +84,39 @@ struct MusicLibrarySection: View {
     @ViewBuilder
     private var accessDeniedContent: some View {
         Text("Mix Notes cannot access your Music library. Enable access in Settings to browse your songs.")
-            .font(.footnote)
-            .foregroundColor(.secondary)
+            .font(MixNotesDesign.sfItalic(14))
+            .foregroundColor(MixNotesDesign.warmGray)
             .padding(.vertical, 4)
-        Button("Open Settings") {
+            .listRowBackground(MixNotesDesign.cream)
+        Button {
             if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
                 openURL(settingsURL)
             }
+        } label: {
+            Text("Open Settings")
+                .font(MixNotesDesign.sfFont(15))
+                .foregroundColor(MixNotesDesign.charcoal)
         }
         .buttonStyle(.plain)
+        .listRowBackground(MixNotesDesign.cream)
     }
 
     @ViewBuilder
     private var requestAccessContent: some View {
         Text("Allow Mix Notes to access your on-device Music library to play recently added songs.")
-            .font(.footnote)
-            .foregroundColor(.secondary)
+            .font(MixNotesDesign.sfItalic(14))
+            .foregroundColor(MixNotesDesign.warmGray)
             .padding(.vertical, 4)
-        Button("Allow Music Library Access") {
+            .listRowBackground(MixNotesDesign.cream)
+        Button {
             libraryManager.requestAuthorization()
+        } label: {
+            Text("Allow Music Library Access")
+                .font(MixNotesDesign.sfFont(15))
+                .foregroundColor(MixNotesDesign.charcoal)
         }
         .buttonStyle(.plain)
+        .listRowBackground(MixNotesDesign.cream)
     }
 }
 
@@ -103,25 +124,22 @@ private struct MusicLibraryRow: View {
     let song: LibrarySong
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(song.displayTitle)
-                    .font(.headline)
-                    .foregroundColor(.primary)
+                    .font(MixNotesDesign.sfFont(16, weight: .medium))
+                    .foregroundColor(MixNotesDesign.charcoal)
                 Text(song.displaySubtitle)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(MixNotesDesign.sfFont(13))
+                    .foregroundColor(MixNotesDesign.warmGray)
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 4) {
-                Text("Added: \(formattedDate(song.dateAdded))")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+            VStack(alignment: .trailing, spacing: 3) {
                 Text(formattedDuration(song.duration))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(MixNotesDesign.sfFont(13))
+                    .foregroundColor(MixNotesDesign.warmGray)
             }
         }
         .padding(.vertical, 4)

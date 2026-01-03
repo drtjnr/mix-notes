@@ -11,13 +11,35 @@ import GoogleMobileAds
 import UIKit
 import MediaPlayer
 
+// MARK: - Design System
+
+enum MixNotesDesign {
+    // Warm cream color palette
+    static let cream = Color(red: 0.98, green: 0.97, blue: 0.96)
+    static let warmWhite = Color(red: 0.995, green: 0.99, blue: 0.985)
+    static let charcoal = Color(red: 0.17, green: 0.17, blue: 0.16)
+    static let warmGray = Color(red: 0.55, green: 0.53, blue: 0.50)
+    static let lightTaupe = Color(red: 0.88, green: 0.86, blue: 0.83)
+    static let mediumTaupe = Color(red: 0.75, green: 0.72, blue: 0.68)
+    static let darkTaupe = Color(red: 0.35, green: 0.33, blue: 0.30)
+
+    // SF Pro font
+    static func sfFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight, design: .default)
+    }
+
+    // SF Pro italic for emphasis
+    static func sfItalic(_ size: CGFloat) -> Font {
+        .system(size: size, weight: .regular, design: .default).italic()
+    }
+}
+
 struct MixNotesTitleView: View {
     var body: some View {
         Text("mix notes")
             .font(.custom("LeagueSpartan-Bold", size: 20))
-            .foregroundColor(.primary)
-            .kerning(-0.5)
-          
+            .foregroundColor(MixNotesDesign.charcoal)
+            .kerning(-0.3)
     }
 }
 
@@ -25,8 +47,8 @@ struct ABTitleView: View {
     var body: some View {
         Text("ab")
             .font(.custom("LeagueSpartan-Bold", size: 20))
-            .foregroundColor(.primary)
-            .kerning(-0.5)
+            .foregroundColor(MixNotesDesign.charcoal)
+            .kerning(-0.3)
     }
 }
 
@@ -34,8 +56,8 @@ struct ChordsTitleView: View {
     var body: some View {
         Text("chords")
             .font(.custom("LeagueSpartan-Bold", size: 20))
-            .foregroundColor(.primary)
-            .kerning(-0.5)
+            .foregroundColor(MixNotesDesign.charcoal)
+            .kerning(-0.3)
     }
 }
 
@@ -49,16 +71,12 @@ struct ABModeToggleButton: View {
             }
         } label: {
             Text("ab")
-                .font(.custom("LeagueSpartan-Bold", size: 16))
+                .font(.custom("LeagueSpartan-Bold", size: 14))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(isOn ? Color.black : Color(.systemGray5))
-                .foregroundColor(isOn ? .white : .primary)
+                .background(isOn ? MixNotesDesign.charcoal : MixNotesDesign.cream)
+                .foregroundColor(isOn ? MixNotesDesign.cream : MixNotesDesign.charcoal)
                 .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(Color.black, lineWidth: 1)
-                )
         }
         .buttonStyle(.plain)
     }
@@ -74,16 +92,12 @@ struct ChordsModeToggleButton: View {
             }
         } label: {
             Text("chords")
-                .font(.custom("LeagueSpartan-Bold", size: 16))
+                .font(.custom("LeagueSpartan-Bold", size: 14))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(isOn ? Color.black : Color(.systemGray5))
-                .foregroundColor(isOn ? .white : .primary)
+                .background(isOn ? MixNotesDesign.charcoal : MixNotesDesign.cream)
+                .foregroundColor(isOn ? MixNotesDesign.cream : MixNotesDesign.charcoal)
                 .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(Color.black, lineWidth: 1)
-                )
         }
         .buttonStyle(.plain)
     }
@@ -94,6 +108,7 @@ struct ContentView: View {
     @StateObject private var abViewModel = ABAudioAnnotationViewModel()
     @StateObject private var chordsViewModel = AudioAnnotationViewModel(annotationNamespace: "chords")
     @StateObject private var libraryManager = LibraryManager()
+    @ObservedObject private var repeatStateManager = RepeatStateManager.shared
     @State private var showingShareSheet = false
     @State private var showingChordsShareSheet = false
     @State private var showingCustomAnnotation = false
@@ -333,7 +348,9 @@ struct ContentView: View {
             mainContent
 
             if shouldShowBanner {
-                Divider()
+                Rectangle()
+                    .fill(MixNotesDesign.lightTaupe)
+                    .frame(height: 1)
 
                 BannerAdView(adUnitID: AdMobIdentifiers.bannerAdUnitID)
                     .frame(maxWidth: .infinity)
@@ -341,11 +358,14 @@ struct ContentView: View {
                     .padding(.vertical, 4)
             }
         }
+        .background(MixNotesDesign.cream)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { principalToolbarItem }
         .toolbar { trailingToolbarItem }
         .toolbar { leadingToolbarItem }
+        .toolbarBackground(MixNotesDesign.cream, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .sheet(isPresented: $showingShareSheet) {
             ShareSheet(activityItems: [viewModel.exportAnnotations()])
         }
@@ -391,12 +411,20 @@ struct ContentView: View {
 
         return ToolbarItem(placement: .navigationBarTrailing) {
             if shouldShowExport {
-                Button("Export") {
+                Button {
                     showingShareSheet = true
+                } label: {
+                    Text("Export")
+                        .font(MixNotesDesign.sfFont(16))
+                        .foregroundColor(MixNotesDesign.charcoal)
                 }
             } else if shouldShowShare {
-                Button("Share") {
+                Button {
                     showingChordsShareSheet = true
+                } label: {
+                    Text("Share")
+                        .font(MixNotesDesign.sfFont(16))
+                        .foregroundColor(MixNotesDesign.charcoal)
                 }
             } else if shouldShowModeToggle {
                 modeToggleButtons
@@ -411,8 +439,12 @@ struct ContentView: View {
                 Button {
                     handleRecentsTapped()
                 } label: {
-                    Image(systemName: "chevron.backward")
-                    Text("Recents")
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.backward")
+                        Text("Recents")
+                            .font(MixNotesDesign.sfFont(16))
+                    }
+                    .foregroundColor(MixNotesDesign.charcoal)
                 }
             }
         }
@@ -439,31 +471,33 @@ struct ContentView: View {
     private var loadingView: some View {
         VStack(spacing: 20) {
             ProgressView()
-                .scaleEffect(1.5)
+                .scaleEffect(1.2)
+                .tint(MixNotesDesign.charcoal)
 
             Text("Loading audio file...")
-                .font(.headline)
-                .foregroundColor(.primary)
+                .font(MixNotesDesign.sfFont(18, weight: .medium))
+                .foregroundColor(MixNotesDesign.charcoal)
 
             Text("Please wait while we prepare your audio file for playback")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(MixNotesDesign.sfItalic(14))
+                .foregroundColor(MixNotesDesign.warmGray)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal)
+                .padding(.horizontal, 40)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(MixNotesDesign.cream)
     }
 
     private var mixPlaybackView: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             Text(viewModel.currentFileName)
-                .font(.headline)
-                .foregroundColor(.primary)
+                .font(MixNotesDesign.sfFont(17, weight: .medium))
+                .foregroundColor(MixNotesDesign.charcoal)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
             GeometryReader { geometry in
-                HStack(spacing: 36) {
+                HStack(spacing: 34) {
                     Button(action: { viewModel.goToBeginning() }) {
                         Image(systemName: "backward.end.fill")
                     }
@@ -472,8 +506,7 @@ struct ContentView: View {
                         ZStack {
                             Image(systemName: "gobackward")
                             Text("3")
-                                .font(.caption2)
-                                .fontWeight(.bold)
+                                .font(.system(size: 10, weight: .bold))
                                 .offset(x: 0.3, y: 1)
                         }
                     }
@@ -483,7 +516,7 @@ struct ContentView: View {
                             .padding(8)
                             .background(
                                 Circle()
-                                    .stroke(Color.primary.opacity(0.8), lineWidth: 1)
+                                    .stroke(MixNotesDesign.charcoal.opacity(0.6), lineWidth: 1)
                             )
                     }
                     .scaleEffect(1.15)
@@ -492,44 +525,44 @@ struct ContentView: View {
                         ZStack {
                             Image(systemName: "goforward")
                             Text("15")
-                                .font(.caption2)
-                                .fontWeight(.bold)
+                                .font(.system(size: 10, weight: .bold))
                                 .offset(x: 0, y: 1)
                         }
                     }
 
                     Button(action: { viewModel.toggleRepeat() }) {
                         Image(systemName: "repeat")
-                            .foregroundColor(viewModel.isRepeating ? .primary : .secondary)
+                            .foregroundColor(viewModel.isRepeating ? MixNotesDesign.charcoal : MixNotesDesign.warmGray)
                     }
                 }
+                .foregroundColor(MixNotesDesign.charcoal)
                 .frame(width: geometry.size.width * 0.8)
                 .frame(maxWidth: .infinity)
             }
-            .frame(height: 36)
+            .frame(height: 34)
             .font(.title2)
             .buttonStyle(PlainButtonStyle())
 
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Text(timeString(from: viewModel.currentTime))
-                    .font(.title3)
+                    .font(MixNotesDesign.sfFont(16))
                     .monospacedDigit()
-                    .foregroundColor(.primary)
+                    .foregroundColor(MixNotesDesign.charcoal)
 
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Rectangle()
-                            .fill(Color.gray.opacity(0.3))
-                            .frame(height: 2)
+                            .fill(MixNotesDesign.lightTaupe)
+                            .frame(height: 1)
 
                         Rectangle()
-                            .fill(Color.gray.opacity(0.6))
-                            .frame(width: geometry.size.width * viewModel.progress, height: 2)
+                            .fill(MixNotesDesign.mediumTaupe)
+                            .frame(width: geometry.size.width * viewModel.progress, height: 1)
 
-                        Rectangle()
-                            .fill(Color.black)
-                            .frame(width: 2, height: 12)
-                            .offset(x: geometry.size.width * viewModel.progress - 1)
+                        Circle()
+                            .fill(MixNotesDesign.charcoal)
+                            .frame(width: 8, height: 8)
+                            .offset(x: geometry.size.width * viewModel.progress - 4)
                     }
                     .contentShape(Rectangle())
                     .gesture(
@@ -545,17 +578,17 @@ struct ContentView: View {
                             }
                     )
                 }
-                .frame(height: 12)
+                .frame(height: 10)
 
                 Text(timeString(from: viewModel.duration))
-                    .font(.title3)
+                    .font(MixNotesDesign.sfFont(16))
                     .monospacedDigit()
-                    .foregroundColor(.secondary)
+                    .foregroundColor(MixNotesDesign.warmGray)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, -10)
+            .padding(.horizontal, 24)
+            .padding(.top, -8)
 
-            LazyVGrid(columns: columns, spacing: 15) {
+            LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(AnnotationType.allCases, id: \.self) { type in
                     Button {
                         if type == .custom {
@@ -569,11 +602,12 @@ struct ContentView: View {
                         }
                     } label: {
                         Text(type.rawValue)
+                            .font(MixNotesDesign.sfFont(14))
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
+                            .padding(.vertical, 11)
+                            .background(MixNotesDesign.charcoal)
+                            .foregroundColor(MixNotesDesign.cream)
+                            .cornerRadius(6)
                     }
                 }
             }
@@ -606,16 +640,25 @@ struct ContentView: View {
                 ForEach(viewModel.annotations.sorted(by: { $0.timestamp < $1.timestamp })) { annotation in
                     HStack {
                         Text(timeString(from: annotation.timestamp))
+                            .font(MixNotesDesign.sfFont(15))
                             .monospacedDigit()
+                            .foregroundColor(MixNotesDesign.charcoal)
                         Spacer()
                         if annotation.type == .custom, let customText = annotation.customText {
                             Text("Custom: \(customText)")
+                                .font(MixNotesDesign.sfItalic(15))
+                                .foregroundColor(MixNotesDesign.darkTaupe)
                         } else if let customText = annotation.customText {
                             Text("\(annotation.type.rawValue): \(customText)")
+                                .font(MixNotesDesign.sfFont(15))
+                                .foregroundColor(MixNotesDesign.darkTaupe)
                         } else {
                             Text(annotation.type.rawValue)
+                                .font(MixNotesDesign.sfFont(15))
+                                .foregroundColor(MixNotesDesign.darkTaupe)
                         }
                     }
+                    .listRowBackground(MixNotesDesign.cream)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
                             viewModel.deleteAnnotation(annotation)
@@ -626,20 +669,22 @@ struct ContentView: View {
                 }
             }
             .listStyle(PlainListStyle())
+            .scrollContentBackground(.hidden)
+            .background(MixNotesDesign.cream)
         }
+        .background(MixNotesDesign.cream)
     }
 
     private var chordsPlaybackView: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             Text(chordsViewModel.currentFileName)
-                .font(.headline)
-                .foregroundColor(.primary)
+                .font(MixNotesDesign.sfFont(17, weight: .medium))
+                .foregroundColor(MixNotesDesign.charcoal)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
-                .padding(.top, -8)
 
             GeometryReader { geometry in
-                HStack(spacing: 36) {
+                HStack(spacing: 34) {
                     Button(action: { chordsViewModel.goToBeginning() }) {
                         Image(systemName: "backward.end.fill")
                     }
@@ -648,8 +693,7 @@ struct ContentView: View {
                         ZStack {
                             Image(systemName: "gobackward")
                             Text("3")
-                                .font(.caption2)
-                                .fontWeight(.bold)
+                                .font(.system(size: 10, weight: .bold))
                                 .offset(x: 0.3, y: 1)
                         }
                     }
@@ -659,7 +703,7 @@ struct ContentView: View {
                             .padding(8)
                             .background(
                                 Circle()
-                                    .stroke(Color.primary.opacity(0.8), lineWidth: 1)
+                                    .stroke(MixNotesDesign.charcoal.opacity(0.6), lineWidth: 1)
                             )
                     }
                     .scaleEffect(1.15)
@@ -668,44 +712,44 @@ struct ContentView: View {
                         ZStack {
                             Image(systemName: "goforward")
                             Text("15")
-                                .font(.caption2)
-                                .fontWeight(.bold)
+                                .font(.system(size: 10, weight: .bold))
                                 .offset(x: 0, y: 1)
                         }
                     }
 
                     Button(action: { chordsViewModel.toggleRepeat() }) {
                         Image(systemName: "repeat")
-                            .foregroundColor(chordsViewModel.isRepeating ? .primary : .secondary)
+                            .foregroundColor(chordsViewModel.isRepeating ? MixNotesDesign.charcoal : MixNotesDesign.warmGray)
                     }
                 }
+                .foregroundColor(MixNotesDesign.charcoal)
                 .frame(width: geometry.size.width * 0.8)
                 .frame(maxWidth: .infinity)
             }
-            .frame(height: 36)
+            .frame(height: 34)
             .font(.title2)
             .buttonStyle(PlainButtonStyle())
 
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Text(timeString(from: chordsViewModel.currentTime))
-                    .font(.title3)
+                    .font(MixNotesDesign.sfFont(16))
                     .monospacedDigit()
-                    .foregroundColor(.primary)
+                    .foregroundColor(MixNotesDesign.charcoal)
 
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Rectangle()
-                            .fill(Color.gray.opacity(0.3))
-                            .frame(height: 2)
+                            .fill(MixNotesDesign.lightTaupe)
+                            .frame(height: 1)
 
                         Rectangle()
-                            .fill(Color.gray.opacity(0.6))
-                            .frame(width: geometry.size.width * chordsViewModel.progress, height: 2)
+                            .fill(MixNotesDesign.mediumTaupe)
+                            .frame(width: geometry.size.width * chordsViewModel.progress, height: 1)
 
-                        Rectangle()
-                            .fill(Color.black)
-                            .frame(width: 2, height: 12)
-                            .offset(x: geometry.size.width * chordsViewModel.progress - 1)
+                        Circle()
+                            .fill(MixNotesDesign.charcoal)
+                            .frame(width: 8, height: 8)
+                            .offset(x: geometry.size.width * chordsViewModel.progress - 4)
                     }
                     .contentShape(Rectangle())
                     .gesture(
@@ -721,22 +765,24 @@ struct ContentView: View {
                             }
                     )
                 }
-                .frame(height: 12)
+                .frame(height: 10)
 
                 Text(timeString(from: chordsViewModel.duration))
-                    .font(.title3)
+                    .font(MixNotesDesign.sfFont(16))
                     .monospacedDigit()
-                    .foregroundColor(.secondary)
+                    .foregroundColor(MixNotesDesign.warmGray)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, -10)
+            .padding(.horizontal, 24)
+            .padding(.top, -8)
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Key")
-                        .font(.headline)
+                        .font(MixNotesDesign.sfFont(16, weight: .medium))
+                        .foregroundColor(MixNotesDesign.charcoal)
                     Text(currentKeyDisplayName)
-                        .font(.headline)
+                        .font(MixNotesDesign.sfItalic(16))
+                        .foregroundColor(MixNotesDesign.darkTaupe)
                     Spacer()
                     Button {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -744,16 +790,12 @@ struct ContentView: View {
                         }
                     } label: {
                         Text("Minor")
-                            .font(.custom("LeagueSpartan-Bold", size: 14))
+                            .font(.custom("LeagueSpartan-Bold", size: 13))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(isMinorKey ? Color.black : Color(.systemGray5))
-                            .foregroundColor(isMinorKey ? .white : .primary)
+                            .background(isMinorKey ? MixNotesDesign.charcoal : MixNotesDesign.cream)
+                            .foregroundColor(isMinorKey ? MixNotesDesign.cream : MixNotesDesign.charcoal)
                             .clipShape(Capsule())
-                            .overlay(
-                                Capsule()
-                                .stroke(Color.black, lineWidth: 1)
-                        )
                     }
                     .buttonStyle(.plain)
                     .disabled(isNashvilleMode)
@@ -765,30 +807,28 @@ struct ContentView: View {
                         }
                     } label: {
                         Text("Nashville")
-                            .font(.custom("LeagueSpartan-Bold", size: 14))
+                            .font(.custom("LeagueSpartan-Bold", size: 13))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(isNashvilleMode ? Color.black : Color(.systemGray5))
-                            .foregroundColor(isNashvilleMode ? .white : .primary)
+                            .background(isNashvilleMode ? MixNotesDesign.charcoal : MixNotesDesign.cream)
+                            .foregroundColor(isNashvilleMode ? MixNotesDesign.cream : MixNotesDesign.charcoal)
                             .clipShape(Capsule())
-                            .overlay(
-                                Capsule()
-                                    .stroke(Color.black, lineWidth: 1)
-                            )
                     }
                     .buttonStyle(.plain)
                 }
 
                 GeometryReader { geometry in
                     Slider(value: $selectedKeyIndex, in: 0...Double(keyNames.count - 1), step: 1)
+                        .tint(MixNotesDesign.charcoal)
                         .frame(width: geometry.size.width * 0.9)
                         .frame(maxWidth: .infinity)
                 }
                 .frame(height: 24)
             }
             .padding(.horizontal)
+            .padding(.bottom, 16)
 
-            LazyVGrid(columns: chordColumns, spacing: 10) {
+            LazyVGrid(columns: chordColumns, spacing: 8) {
                 ForEach(chordFormulas.indices, id: \.self) { index in
                     let label = chordLabel(for: chordFormulas[index], index: index)
                     let isSecondRow = index >= majorChordsRow1.count
@@ -825,18 +865,19 @@ struct ContentView: View {
                             .font(.custom("LeagueSpartan-Bold", size: 12))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
-                            .background(Color(.systemGray6))
-                            .foregroundColor(.primary)
-                            .cornerRadius(6)
+                            .background(MixNotesDesign.warmWhite)
+                            .foregroundColor(MixNotesDesign.charcoal)
+                            .cornerRadius(5)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                                RoundedRectangle(cornerRadius: 5)
+                                    .stroke(MixNotesDesign.lightTaupe, lineWidth: 1)
                             )
                     }
                     .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal)
+            .padding(.bottom, 16)
             .alert("Edit Chord", isPresented: Binding(
                 get: { editingChordIndex != nil },
                 set: { isPresented in
@@ -870,21 +911,17 @@ struct ContentView: View {
                 }
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Button {
                     deleteLastChordAnnotation()
                 } label: {
                     Text("Delete")
-                        .font(.custom("LeagueSpartan-Bold", size: 14))
+                        .font(.custom("LeagueSpartan-Bold", size: 13))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(Color(.systemGray5))
-                        .foregroundColor(.primary)
+                        .background(MixNotesDesign.cream)
+                        .foregroundColor(MixNotesDesign.charcoal)
                         .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.black.opacity(0.2), lineWidth: 1)
-                        )
                 }
                 .buttonStyle(.plain)
 
@@ -892,16 +929,12 @@ struct ContentView: View {
                     addSkippedBar()
                 } label: {
                     Text("Skip")
-                        .font(.custom("LeagueSpartan-Bold", size: 14))
+                        .font(.custom("LeagueSpartan-Bold", size: 13))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(Color(.systemGray5))
-                        .foregroundColor(.primary)
+                        .background(MixNotesDesign.cream)
+                        .foregroundColor(MixNotesDesign.charcoal)
                         .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.black.opacity(0.2), lineWidth: 1)
-                        )
                 }
                 .buttonStyle(.plain)
 
@@ -911,16 +944,12 @@ struct ContentView: View {
                     }
                 } label: {
                     Text("Double")
-                        .font(.custom("LeagueSpartan-Bold", size: 14))
+                        .font(.custom("LeagueSpartan-Bold", size: 13))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(isDoublePlacement ? Color.black : Color(.systemGray5))
-                        .foregroundColor(isDoublePlacement ? .white : .primary)
+                        .background(isDoublePlacement ? MixNotesDesign.charcoal : MixNotesDesign.cream)
+                        .foregroundColor(isDoublePlacement ? MixNotesDesign.cream : MixNotesDesign.charcoal)
                         .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.black.opacity(0.2), lineWidth: 1)
-                        )
                 }
                 .buttonStyle(.plain)
 
@@ -930,37 +959,38 @@ struct ContentView: View {
                     }
                 } label: {
                     Text("Edit")
-                        .font(.custom("LeagueSpartan-Bold", size: 14))
+                        .font(.custom("LeagueSpartan-Bold", size: 13))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(isEditMode ? Color.black : Color(.systemGray5))
-                        .foregroundColor(isEditMode ? .white : .primary)
+                        .background(isEditMode ? MixNotesDesign.charcoal : MixNotesDesign.cream)
+                        .foregroundColor(isEditMode ? MixNotesDesign.cream : MixNotesDesign.charcoal)
                         .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.black.opacity(0.2), lineWidth: 1)
-                        )
                 }
                 .buttonStyle(.plain)
             }
             .padding(.horizontal)
+            .padding(.bottom, 16)
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Chord Chart")
-                    .font(.headline)
+                    .font(MixNotesDesign.sfFont(16, weight: .medium))
+                    .foregroundColor(MixNotesDesign.charcoal)
                     .padding(.horizontal)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 8) {
                         ForEach(0..<chordChartLineCount, id: \.self) { line in
                             chordChartLineView(line)
                                 .padding(.horizontal)
                         }
                     }
                 }
-                .frame(maxHeight: 260)
+                .frame(maxHeight: 240)
+                .background(MixNotesDesign.cream)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(MixNotesDesign.cream)
     }
 
     @ViewBuilder
@@ -970,15 +1000,24 @@ struct ContentView: View {
                 Button {
                     openSharedDocuments()
                 } label: {
-                    Label("Add Audio File", systemImage: "plus.circle.fill")
+                    Label {
+                        Text("Add Audio File")
+                            .font(MixNotesDesign.sfFont(16))
+                            .foregroundColor(MixNotesDesign.charcoal)
+                    } icon: {
+                        Image(systemName: "plus.circle.fill")
+                            .foregroundColor(MixNotesDesign.charcoal)
+                    }
                 }
                 .buttonStyle(.plain)
+                .listRowBackground(MixNotesDesign.cream)
 
                 if viewModel.storedAudioFiles.isEmpty {
                     Text("Imported audio files will appear here.")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
+                        .font(MixNotesDesign.sfItalic(14))
+                        .foregroundColor(MixNotesDesign.warmGray)
                         .padding(.vertical, 4)
+                        .listRowBackground(MixNotesDesign.cream)
                 } else {
                     ForEach(viewModel.storedAudioFiles.sorted(by: { $0.dateAdded > $1.dateAdded })) { storedFile in
                         if mode == .ab {
@@ -991,8 +1030,10 @@ struct ContentView: View {
                     }
                 }
             } header: {
-                Text("Recent Audio Files")
-                    .font(.headline)
+                Text("Recents")
+                    .font(MixNotesDesign.sfFont(17, weight: .medium))
+                    .foregroundColor(MixNotesDesign.charcoal)
+                    .textCase(nil)
             }
 
             if mode == .ab {
@@ -1015,6 +1056,8 @@ struct ContentView: View {
             }
         }
         .listStyle(PlainListStyle())
+        .scrollContentBackground(.hidden)
+        .background(MixNotesDesign.cream)
     }
 
     private func mixStoredFileRow(for storedFile: StoredAudioFile) -> some View {
@@ -1022,26 +1065,27 @@ struct ContentView: View {
             viewModel.loadStoredAudio(storedFile)
         } label: {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(storedFile.displayName)
-                        .font(.headline)
-                        .foregroundColor(.primary)
+                        .font(MixNotesDesign.sfFont(16, weight: .medium))
+                        .foregroundColor(MixNotesDesign.charcoal)
                     Text("Added: \(storedFile.formattedDate)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(MixNotesDesign.sfFont(13))
+                        .foregroundColor(MixNotesDesign.warmGray)
                 }
 
                 Spacer()
 
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 3) {
                     Text(storedFile.formattedDuration)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(MixNotesDesign.sfFont(13))
+                        .foregroundColor(MixNotesDesign.warmGray)
                 }
             }
             .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
+        .listRowBackground(MixNotesDesign.cream)
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 deleteStoredFile(storedFile)
@@ -1056,26 +1100,27 @@ struct ContentView: View {
             chordsViewModel.loadStoredAudio(storedFile)
         } label: {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(storedFile.displayName)
-                        .font(.headline)
-                        .foregroundColor(.primary)
+                        .font(MixNotesDesign.sfFont(16, weight: .medium))
+                        .foregroundColor(MixNotesDesign.charcoal)
                     Text("Added: \(storedFile.formattedDate)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(MixNotesDesign.sfFont(13))
+                        .foregroundColor(MixNotesDesign.warmGray)
                 }
 
                 Spacer()
 
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 3) {
                     Text(storedFile.formattedDuration)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(MixNotesDesign.sfFont(13))
+                        .foregroundColor(MixNotesDesign.warmGray)
                 }
             }
             .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
+        .listRowBackground(MixNotesDesign.cream)
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 deleteStoredFile(storedFile)
@@ -1094,27 +1139,28 @@ struct ContentView: View {
             }
         } label: {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(storedFile.displayName)
-                        .font(.headline)
-                        .foregroundColor(.primary)
+                        .font(MixNotesDesign.sfFont(16, weight: .medium))
+                        .foregroundColor(MixNotesDesign.charcoal)
                     Text("Added: \(storedFile.formattedDate)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(MixNotesDesign.sfFont(13))
+                        .foregroundColor(MixNotesDesign.warmGray)
                 }
 
                 Spacer()
 
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 3) {
                     Text(storedFile.formattedDuration)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(MixNotesDesign.sfFont(13))
+                        .foregroundColor(MixNotesDesign.warmGray)
                 }
             }
             .padding(.vertical, 4)
             .padding(.leading, slot == nil ? 0 : 28)
         }
         .buttonStyle(.plain)
+        .listRowBackground(MixNotesDesign.cream)
         .overlay(alignment: .leading) {
             if let slot {
                 selectionBadge(for: slot)
@@ -1132,11 +1178,10 @@ struct ContentView: View {
 
     private func selectionBadge(for slot: ABAudioAnnotationViewModel.AudioSlot) -> some View {
         Text(slot.displayLabel)
-            .font(.caption)
-            .fontWeight(.bold)
-            .foregroundColor(.white)
+            .font(.system(size: 11, weight: .bold))
+            .foregroundColor(MixNotesDesign.cream)
             .frame(width: 22, height: 22)
-            .background(Circle().fill(Color.green))
+            .background(Circle().fill(MixNotesDesign.charcoal))
     }
 
     private func handleRecentsTapped() {
@@ -1460,18 +1505,18 @@ struct ContentView: View {
             if let annotation, let label = annotation.customText {
                 HStack(spacing: 2) {
                     Text(label)
-                        .font(.custom("LeagueSpartan-Bold", size: 12))
-                        .foregroundColor(.primary)
+                        .font(.custom("LeagueSpartan-Bold", size: 11))
+                        .foregroundColor(MixNotesDesign.charcoal)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                 }
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 3)
                 .onDrag {
                     NSItemProvider(object: annotation.id.uuidString as NSString)
                 }
             }
         }
-        .frame(width: width, height: 28)
+        .frame(width: width, height: 26)
         .contentShape(Rectangle())
         .onDrop(of: [UTType.text], isTargeted: nil) { providers in
             handleChordDrop(providers: providers, bar: bar, beat: beat)
@@ -1498,12 +1543,12 @@ struct ContentView: View {
 
         return GeometryReader { geometry in
             let barCount = max(bars.count, 1)
-            let barlineWidth: CGFloat = 2
-            let beatSpacing: CGFloat = 8
+            let barlineWidth: CGFloat = 1
+            let beatSpacing: CGFloat = 6
             let totalBarlineWidth = barlineWidth * CGFloat(barCount + 1)
             let availableWidth = max(geometry.size.width - totalBarlineWidth, 0)
             let barWidth = availableWidth / CGFloat(barCount)
-            let beatWidth = max(20, (barWidth - (beatSpacing * CGFloat(beatsPerBar - 1)) - 12) / CGFloat(beatsPerBar))
+            let beatWidth = max(18, (barWidth - (beatSpacing * CGFloat(beatsPerBar - 1)) - 10) / CGFloat(beatsPerBar))
 
             HStack(spacing: 0) {
                 barline
@@ -1514,13 +1559,13 @@ struct ContentView: View {
             }
             .frame(width: geometry.size.width, alignment: .leading)
         }
-        .frame(height: 32)
+        .frame(height: 30)
     }
 
     private var barline: some View {
         Rectangle()
-            .fill(Color.secondary.opacity(0.7))
-            .frame(width: 2)
+            .fill(MixNotesDesign.mediumTaupe)
+            .frame(width: 1)
     }
 
     private var chordChartLineCount: Int {
