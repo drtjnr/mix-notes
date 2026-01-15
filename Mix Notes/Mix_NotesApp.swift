@@ -8,10 +8,14 @@
 import SwiftUI
 import UIKit
 import GoogleMobileAds
+import Combine
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        GADMobileAds.sharedInstance().start(completionHandler: nil)
+        GADMobileAds.sharedInstance().start { _ in
+            // SDK initialized - begin preloading interstitial ad
+            InterstitialAdManager.shared.preloadAd()
+        }
         return true
     }
 }
@@ -21,6 +25,9 @@ struct Mix_NotesApp: App {
     @StateObject private var viewModel = AudioAnnotationViewModel()
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var isLoading = true
+    @State private var isColdStart = true
+    @State private var adCancellable: AnyCancellable?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -43,8 +50,43 @@ struct Mix_NotesApp: App {
                     withAnimation(.easeOut(duration: 0.3)) {
                         isLoading = false
                     }
+                    // Enable interstitial display after launch screen fades
+                    if isColdStart {
+                        setupInterstitialObserver()
+                    }
                 }
             }
+            .onChange(of: scenePhase) { oldPhase, newPhase in
+                // Mark as not cold start once app goes to background
+                if newPhase == .background {
+                    isColdStart = false
+                    adCancellable?.cancel()
+                    adCancellable = nil
+                }
+            }
+        }
+    }
+
+    private func setupInterstitialObserver() {
+        // If ad is already ready, show it immediately
+        if InterstitialAdManager.shared.showAdIfReady() {
+            return
+        }
+
+        // Otherwise, subscribe to isAdReady and show when it becomes true
+        adCancellable = InterstitialAdManager.shared.$isAdReady
+            .receive(on: DispatchQueue.main)
+            .filter { $0 == true }
+            .first()
+            .sink { _ in
+                _ = InterstitialAdManager.shared.showAdIfReady()
+                adCancellable = nil
+            }
+
+        // Timeout after 5 seconds - don't keep user waiting too long
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            adCancellable?.cancel()
+            adCancellable = nil
         }
     }
     

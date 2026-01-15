@@ -7,7 +7,7 @@ struct LaunchScreenView: View {
                 .ignoresSafeArea()
 
             Text("mix notes")
-                .font(.custom("LeagueSpartan-Bold", size: 20))
+                .font(.custom("LeagueSpartan-Bold", size: 25))
                 .foregroundColor(MixNotesDesign.charcoal)
                 .kerning(-0.3)
         }
