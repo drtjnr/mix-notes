@@ -7,3 +7,6 @@ DerivedData/
 
 # Audio samples (large)
 Mix Notes/Audio/
+
+# Git worktrees
+.worktrees/
