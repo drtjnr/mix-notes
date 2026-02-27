@@ -18,6 +18,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     @Published var isLoadingFromBrowse: Bool = false
     @Published var currentLibrarySong: LibrarySong?
     @Published private(set) var currentAnnotationIdentifier: String?
+    @Published var playingAnnotationId: UUID?
 
     let repeatStateManager = RepeatStateManager.shared
     var isRepeating: Bool {
@@ -34,10 +35,9 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     private let commandCenter = MPRemoteCommandCenter.shared()
     private var remoteCommandsConfigured = false
     private var isReceivingRemoteEvents = false
-    private let annotationNamespace: String
-    
-    init(annotationNamespace: String = "") {
-        self.annotationNamespace = annotationNamespace
+    private var annotationPlayer: AVAudioPlayer?
+
+    override init() {
         super.init()
         loadStoredFilesList()
         cleanUpInvalidStoredFiles()
@@ -262,10 +262,8 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     func addAnnotation(
         _ type: AnnotationType,
         customText: String? = nil,
-        timestamp: TimeInterval? = nil,
-        chordIndex: Int? = nil,
-        barIndex: Int? = nil,
-        beatIndex: Int? = nil
+        audioRecordingFileName: String? = nil,
+        timestamp: TimeInterval? = nil
     ) {
         guard hasLoadedAudio else { return }
         let baseTime = timestamp ?? currentPlaybackTimeValue()
@@ -274,9 +272,7 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
             timestamp: adjustedTime,
             type: type,
             customText: customText,
-            chordIndex: chordIndex,
-            barIndex: barIndex,
-            beatIndex: beatIndex
+            audioRecordingFileName: audioRecordingFileName
         )
         annotations.append(annotation)
         saveAnnotations() // Save after adding
@@ -410,6 +406,10 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
             let tenths = Int((annotation.timestamp.truncatingRemainder(dividingBy: 1)) * 10)
             let timeString = String(format: "%02d:%02d.%01d", minutes, seconds, tenths)
             
+            if annotation.audioRecordingFileName != nil {
+                let suffix = annotation.customText.map { " - \($0)" } ?? ""
+                return "\(timeString): Custom - [Voice Note]\(suffix)"
+            }
             if annotation.type == .custom, let customText = annotation.customText {
                 return "\(timeString): Custom - \(customText)"
             }
@@ -420,15 +420,13 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     }
     
     func deleteAnnotation(_ annotation: AudioAnnotation) {
+        if let fileName = annotation.audioRecordingFileName {
+            AudioRecorderManager.deleteRecording(fileName: fileName)
+        }
         annotations.removeAll { $0.id == annotation.id }
         saveAnnotations() // Save after deleting
     }
 
-    func replaceAnnotations(_ newAnnotations: [AudioAnnotation]) {
-        annotations = newAnnotations
-        saveAnnotations()
-    }
-    
     func goBackward(by seconds: TimeInterval) {
         guard hasLoadedAudio else { return }
         let newTime = max(0, currentPlaybackTimeValue() - seconds)
@@ -515,6 +513,15 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     func deleteAnnotations(for storedFile: StoredAudioFile) {
         let annotationIdentifier = annotationIdentifier(forStoredURL: storedFile.resolvedStoredFileURL)
         let annotationURL = annotationsFileURL(for: annotationIdentifier)
+        // Clean up associated audio recordings before deleting annotation file
+        if let data = try? Data(contentsOf: annotationURL),
+           let storedAnnotations = try? JSONDecoder().decode([AudioAnnotation].self, from: data) {
+            for annotation in storedAnnotations {
+                if let fileName = annotation.audioRecordingFileName {
+                    AudioRecorderManager.deleteRecording(fileName: fileName)
+                }
+            }
+        }
         try? FileManager.default.removeItem(at: annotationURL)
     }
     
@@ -743,15 +750,11 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
     }
 
     private func annotationIdentifier(forStoredURL url: URL) -> String {
-        "\(annotationPrefix())\(url.lastPathComponent)"
+        url.lastPathComponent
     }
 
     private func annotationIdentifier(for song: LibrarySong) -> String {
-        "\(annotationPrefix())library-\(song.id)"
-    }
-
-    private func annotationPrefix() -> String {
-        annotationNamespace.isEmpty ? "" : "\(annotationNamespace)-"
+        "library-\(song.id)"
     }
     
     private func saveAnnotations() {
@@ -787,55 +790,60 @@ class AudioAnnotationViewModel: NSObject, ObservableObject, AVAudioPlayerDelegat
         }
     }
 
-    struct ChordOverride: Codable {
-        let label: String
-        let keyIndex: Int
-    }
+    // MARK: - Annotation Recording Playback
 
-    func loadChordOverrides(currentKeyIndex: Int) -> [Int: ChordOverride] {
-        guard let identifier = currentAnnotationIdentifier else { return [:] }
-        let fileURL = chordOverridesFileURL(for: identifier)
+    private var wasPlayingBeforeAnnotation = false
+
+    func playAnnotationRecording(_ annotation: AudioAnnotation) {
+        guard let url = annotation.resolvedAudioRecordingURL else { return }
+        stopAnnotationPlayback()
+
+        // Pause main playback, remember state to resume later
+        wasPlayingBeforeAnnotation = isPlaying
+        if isPlaying {
+            pauseAudio()
+        }
+
         do {
-            let data = try Data(contentsOf: fileURL)
-            if let overrides = try? JSONDecoder().decode([Int: ChordOverride].self, from: data) {
-                return overrides
-            }
-            let legacy = try JSONDecoder().decode([Int: String].self, from: data)
-            return legacy.mapValues { ChordOverride(label: $0, keyIndex: currentKeyIndex) }
+            annotationPlayer = try AVAudioPlayer(contentsOf: url)
+            annotationPlayer?.delegate = self
+            annotationPlayer?.play()
+            playingAnnotationId = annotation.id
         } catch {
-            return [:]
+            print("Error playing annotation recording: \(error)")
+            if wasPlayingBeforeAnnotation {
+                playAudio()
+            }
         }
     }
 
-    func saveChordOverrides(_ overrides: [Int: ChordOverride]) {
-        guard let identifier = currentAnnotationIdentifier else { return }
-        do {
-            let annotationsDirectory = getAnnotationsDirectory()
-            if !FileManager.default.fileExists(atPath: annotationsDirectory.path) {
-                try FileManager.default.createDirectory(at: annotationsDirectory, withIntermediateDirectories: true)
-            }
-
-            let data = try JSONEncoder().encode(overrides)
-            try data.write(to: chordOverridesFileURL(for: identifier))
-        } catch {
-            print("Error saving chord overrides: \(error)")
+    func stopAnnotationPlayback() {
+        let shouldResume = playingAnnotationId != nil && wasPlayingBeforeAnnotation
+        annotationPlayer?.stop()
+        annotationPlayer = nil
+        playingAnnotationId = nil
+        if shouldResume {
+            playAudio()
         }
     }
 
-    private func chordOverridesFileURL(for identifier: String) -> URL {
-        getAnnotationsDirectory()
-            .appendingPathComponent("\(identifier)-chords")
-            .appendingPathExtension("json")
-    }
-    
     // MARK: - AVAudioPlayerDelegate
-    
+
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         DispatchQueue.main.async {
-            self.isPlaying = false
-            self.stopTimer()
-            self.updateNowPlayingInfo(playbackRate: 0.0)
-            self.updateNowPlayingElapsedTime(self.audioPlayer?.duration ?? self.currentTime)
+            if player === self.annotationPlayer {
+                let shouldResume = self.wasPlayingBeforeAnnotation
+                self.playingAnnotationId = nil
+                self.annotationPlayer = nil
+                if shouldResume {
+                    self.playAudio()
+                }
+            } else {
+                self.isPlaying = false
+                self.stopTimer()
+                self.updateNowPlayingInfo(playbackRate: 0.0)
+                self.updateNowPlayingElapsedTime(self.audioPlayer?.duration ?? self.currentTime)
+            }
         }
     }
     

@@ -5,26 +5,26 @@ struct AudioAnnotation: Identifiable, Codable {
     let timestamp: TimeInterval
     let type: AnnotationType
     let customText: String?
-    let chordIndex: Int?
-    let barIndex: Int?
-    let beatIndex: Int?
-    
+    let audioRecordingFileName: String?
+
     init(
         id: UUID = UUID(),
         timestamp: TimeInterval,
         type: AnnotationType,
         customText: String? = nil,
-        chordIndex: Int? = nil,
-        barIndex: Int? = nil,
-        beatIndex: Int? = nil
+        audioRecordingFileName: String? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
         self.type = type
         self.customText = customText
-        self.chordIndex = chordIndex
-        self.barIndex = barIndex
-        self.beatIndex = beatIndex
+        self.audioRecordingFileName = audioRecordingFileName
+    }
+
+    var resolvedAudioRecordingURL: URL? {
+        guard let fileName = audioRecordingFileName else { return nil }
+        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documentsDirectory.appendingPathComponent("AudioRecordings").appendingPathComponent(fileName)
     }
 }
 
@@ -35,4 +35,4 @@ enum AnnotationType: String, Codable, CaseIterable {
     case tooQuiet = "Too Quiet"
     case timing = "Timing"
     case custom = "Custom"
-} 
+}

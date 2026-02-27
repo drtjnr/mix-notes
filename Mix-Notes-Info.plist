@@ -255,5 +255,7 @@
 	</array>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Mix Notes uses your Music library to play local songs for annotation and playback.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Mix Notes uses the microphone to record voice annotations for your audio files.</string>
 </dict>
 </plist>
