@@ -7,13 +7,6 @@ struct ABPlaybackView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            // Invisible spacer to preserve layout above controls
-            Text("Filename spacer")
-                .font(MixNotesDesign.sfFont(17, weight: .medium))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-                .opacity(0)
-
             playbackControls
                 .padding(.top, 4)
 
@@ -66,73 +59,98 @@ struct ABPlaybackView: View {
 
     private var playbackControls: some View {
         VStack(spacing: 16) {
-            GeometryReader { geometry in
-                HStack(spacing: 34) {
-                    Button(action: { viewModel.goToBeginning() }) {
-                        Image(systemName: "backward.end.fill")
-                    }
+            HStack(spacing: 0) {
+                Spacer()
 
-                    Button(action: { viewModel.goBackward(by: 3) }) {
-                        ZStack {
-                            Image(systemName: "gobackward")
-                            Text("3")
-                                .font(.system(size: 10, weight: .bold))
-                                .offset(x: 0.3, y: 1)
-                        }
-                    }
+                // Skip back — lightweight outline
+                Button(action: { viewModel.goToBeginning() }) {
+                    Image(systemName: "backward.end")
+                        .font(.system(size: 22, weight: .light))
+                }
+                .frame(width: 48, height: 48)
 
-                    Button(action: { viewModel.togglePlayback() }) {
-                        Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
-                            .padding(8)
-                            .background(
-                                Circle()
-                                    .stroke(MixNotesDesign.charcoal.opacity(0.6), lineWidth: 1)
-                            )
-                    }
-                    .scaleEffect(1.15)
+                Spacer()
 
-                    Button(action: { viewModel.goForward(by: 15) }) {
-                        ZStack {
-                            Image(systemName: "goforward")
-                            Text("15")
-                                .font(.system(size: 10, weight: .bold))
-                                .offset(x: 0, y: 1)
-                        }
-                    }
-
-                    Button(action: { viewModel.toggleRepeat() }) {
-                        Image(systemName: "repeat")
-                            .foregroundColor(viewModel.isRepeating ? MixNotesDesign.charcoal : MixNotesDesign.warmGray)
+                // Rewind 3s
+                Button(action: { viewModel.goBackward(by: 3) }) {
+                    ZStack {
+                        Image(systemName: "gobackward")
+                            .font(.system(size: 32, weight: .light))
+                        Text("3")
+                            .font(.system(size: 13, weight: .bold))
+                            .offset(x: 0.3, y: 1)
                     }
                 }
-                .foregroundColor(MixNotesDesign.charcoal)
-                .frame(width: geometry.size.width * 0.8)
-                .frame(maxWidth: .infinity)
-            }
-            .frame(height: 34)
-            .font(.title2)
-            .buttonStyle(PlainButtonStyle())
+                .frame(width: 56, height: 56)
 
-            HStack(spacing: 10) {
+                Spacer()
+
+                // Play/Pause
+                Button(action: { viewModel.togglePlayback() }) {
+                    Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 24))
+                        .offset(x: viewModel.isPlaying ? 0 : 2)
+                }
+                .frame(width: 56, height: 56)
+                .background(
+                    Circle()
+                        .stroke(MixNotesDesign.charcoal, lineWidth: 2)
+                )
+
+                Spacer()
+
+                // Forward 15s
+                Button(action: { viewModel.goForward(by: 15) }) {
+                    ZStack {
+                        Image(systemName: "goforward")
+                            .font(.system(size: 32, weight: .light))
+                        Text("15")
+                            .font(.system(size: 13, weight: .bold))
+                            .offset(x: 0, y: 1)
+                    }
+                }
+                .frame(width: 56, height: 56)
+
+                Spacer()
+
+                // Repeat
+                Button(action: { viewModel.toggleRepeat() }) {
+                    Image(systemName: "repeat")
+                        .font(.system(size: 22))
+                        .foregroundColor(viewModel.isRepeating ? MixNotesDesign.charcoal : MixNotesDesign.warmGray)
+                }
+                .frame(width: 48, height: 48)
+
+                Spacer()
+            }
+            .foregroundColor(MixNotesDesign.charcoal)
+            .buttonStyle(PlainButtonStyle())
+            .padding(.horizontal)
+
+            HStack(spacing: 12) {
                 Text(timeString(from: viewModel.currentTime))
-                    .font(MixNotesDesign.sfFont(16))
+                    .font(MixNotesDesign.sfFont(14, weight: .medium))
                     .monospacedDigit()
-                    .foregroundColor(MixNotesDesign.charcoal)
+                    .foregroundColor(MixNotesDesign.darkTaupe)
 
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
-                        Rectangle()
+                        // Track
+                        Capsule()
                             .fill(MixNotesDesign.lightTaupe)
-                            .frame(height: 1)
+                            .frame(height: 4)
 
-                        Rectangle()
+                        // Filled portion
+                        Capsule()
                             .fill(MixNotesDesign.mediumTaupe)
-                            .frame(width: geometry.size.width * viewModel.progress, height: 1)
+                            .frame(width: geometry.size.width * viewModel.progress, height: 4)
 
+                        // Thumb
                         Circle()
                             .fill(MixNotesDesign.charcoal)
-                            .frame(width: 8, height: 8)
-                            .offset(x: geometry.size.width * viewModel.progress - 4)
+                            .frame(width: 14, height: 14)
+                            .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                            .offset(x: geometry.size.width * viewModel.progress - 7)
                     }
                     .contentShape(Rectangle())
                     .gesture(
@@ -148,12 +166,12 @@ struct ABPlaybackView: View {
                             }
                     )
                 }
-                .frame(height: 10)
+                .frame(height: 20)
 
                 Text(timeString(from: viewModel.duration))
-                    .font(MixNotesDesign.sfFont(16))
+                    .font(MixNotesDesign.sfFont(14, weight: .medium))
                     .monospacedDigit()
-                    .foregroundColor(MixNotesDesign.warmGray)
+                    .foregroundColor(MixNotesDesign.darkTaupe)
             }
             .padding(.horizontal, 24)
             .padding(.top, -8)

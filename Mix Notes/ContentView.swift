@@ -14,14 +14,14 @@ import MediaPlayer
 // MARK: - Design System
 
 enum MixNotesDesign {
-    // Warm cream color palette
-    static let cream = Color(red: 0.98, green: 0.97, blue: 0.96)
-    static let warmWhite = Color(red: 0.995, green: 0.99, blue: 0.985)
-    static let charcoal = Color(red: 0.17, green: 0.17, blue: 0.16)
-    static let warmGray = Color(red: 0.55, green: 0.53, blue: 0.50)
-    static let lightTaupe = Color(red: 0.88, green: 0.86, blue: 0.83)
-    static let mediumTaupe = Color(red: 0.75, green: 0.72, blue: 0.68)
-    static let darkTaupe = Color(red: 0.35, green: 0.33, blue: 0.30)
+    // Cool gray color palette
+    static let cream = Color(red: 247/255, green: 248/255, blue: 249/255)
+    static let warmWhite = Color(red: 252/255, green: 252/255, blue: 253/255)
+    static let charcoal = Color(red: 23/255, green: 30/255, blue: 45/255)
+    static let warmGray = Color(red: 120/255, green: 125/255, blue: 135/255)
+    static let lightTaupe = Color(red: 210/255, green: 213/255, blue: 218/255)
+    static let mediumTaupe = Color(red: 170/255, green: 175/255, blue: 183/255)
+    static let darkTaupe = Color(red: 80/255, green: 86/255, blue: 98/255)
 
     // SF Pro font
     static func sfFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
@@ -63,11 +63,28 @@ struct ABModeToggleButton: View {
         } label: {
             Text("ab")
                 .font(.custom("LeagueSpartan-Bold", size: 14))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(isOn ? MixNotesDesign.charcoal : MixNotesDesign.cream)
-                .foregroundColor(isOn ? MixNotesDesign.cream : MixNotesDesign.charcoal)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(
+                    Group {
+                        if isOn {
+                            LinearGradient(
+                                colors: [MixNotesDesign.charcoal, MixNotesDesign.charcoal.opacity(0.85)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        } else {
+                            LinearGradient(
+                                colors: [MixNotesDesign.cream, MixNotesDesign.cream],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        }
+                    }
+                )
+                .foregroundColor(isOn ? .white : MixNotesDesign.charcoal)
                 .clipShape(Capsule())
+                .shadow(color: .black.opacity(isOn ? 0.15 : 0.05), radius: 4, y: 2)
         }
         .buttonStyle(.plain)
     }
@@ -199,8 +216,7 @@ struct ContentView: View {
                 Button {
                     showingShareSheet = true
                 } label: {
-                    Text("Export")
-                        .font(MixNotesDesign.sfFont(16))
+                    Image(systemName: "square.and.arrow.up")
                         .foregroundColor(MixNotesDesign.charcoal)
                 }
             } else if shouldShowModeToggle {
@@ -271,73 +287,98 @@ struct ContentView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
-            GeometryReader { geometry in
-                HStack(spacing: 34) {
-                    Button(action: { viewModel.goToBeginning() }) {
-                        Image(systemName: "backward.end.fill")
-                    }
+            HStack(spacing: 0) {
+                Spacer()
 
-                    Button(action: { viewModel.goBackward(by: 3) }) {
-                        ZStack {
-                            Image(systemName: "gobackward")
-                            Text("3")
-                                .font(.system(size: 10, weight: .bold))
-                                .offset(x: 0.3, y: 1)
-                        }
-                    }
+                // Skip back — lightweight outline
+                Button(action: { viewModel.goToBeginning() }) {
+                    Image(systemName: "backward.end")
+                        .font(.system(size: 22, weight: .light))
+                }
+                .frame(width: 48, height: 48)
 
-                    Button(action: { viewModel.togglePlayback() }) {
-                        Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
-                            .padding(8)
-                            .background(
-                                Circle()
-                                    .stroke(MixNotesDesign.charcoal.opacity(0.6), lineWidth: 1)
-                            )
-                    }
-                    .scaleEffect(1.15)
+                Spacer()
 
-                    Button(action: { viewModel.goForward(by: 15) }) {
-                        ZStack {
-                            Image(systemName: "goforward")
-                            Text("15")
-                                .font(.system(size: 10, weight: .bold))
-                                .offset(x: 0, y: 1)
-                        }
-                    }
-
-                    Button(action: { viewModel.toggleRepeat() }) {
-                        Image(systemName: "repeat")
-                            .foregroundColor(viewModel.isRepeating ? MixNotesDesign.charcoal : MixNotesDesign.warmGray)
+                // Rewind 3s
+                Button(action: { viewModel.goBackward(by: 3) }) {
+                    ZStack {
+                        Image(systemName: "gobackward")
+                            .font(.system(size: 32, weight: .light))
+                        Text("3")
+                            .font(.system(size: 13, weight: .bold))
+                            .offset(x: 0.3, y: 1)
                     }
                 }
-                .foregroundColor(MixNotesDesign.charcoal)
-                .frame(width: geometry.size.width * 0.8)
-                .frame(maxWidth: .infinity)
-            }
-            .frame(height: 34)
-            .font(.title2)
-            .buttonStyle(PlainButtonStyle())
+                .frame(width: 56, height: 56)
 
-            HStack(spacing: 10) {
+                Spacer()
+
+                // Play/Pause
+                Button(action: { viewModel.togglePlayback() }) {
+                    Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 24))
+                        .offset(x: viewModel.isPlaying ? 0 : 2)
+                }
+                .frame(width: 56, height: 56)
+                .background(
+                    Circle()
+                        .stroke(MixNotesDesign.charcoal, lineWidth: 2)
+                )
+
+                Spacer()
+
+                // Forward 15s
+                Button(action: { viewModel.goForward(by: 15) }) {
+                    ZStack {
+                        Image(systemName: "goforward")
+                            .font(.system(size: 32, weight: .light))
+                        Text("15")
+                            .font(.system(size: 13, weight: .bold))
+                            .offset(x: 0, y: 1)
+                    }
+                }
+                .frame(width: 56, height: 56)
+
+                Spacer()
+
+                // Repeat — w-12 h-12, icon w-7 h-7
+                Button(action: { viewModel.toggleRepeat() }) {
+                    Image(systemName: "repeat")
+                        .font(.system(size: 22))
+                        .foregroundColor(viewModel.isRepeating ? MixNotesDesign.charcoal : MixNotesDesign.warmGray)
+                }
+                .frame(width: 48, height: 48)
+
+                Spacer()
+            }
+            .foregroundColor(MixNotesDesign.charcoal)
+            .buttonStyle(PlainButtonStyle())
+            .padding(.horizontal)
+
+            HStack(spacing: 12) {
                 Text(timeString(from: viewModel.currentTime))
-                    .font(MixNotesDesign.sfFont(16))
+                    .font(MixNotesDesign.sfFont(14, weight: .medium))
                     .monospacedDigit()
-                    .foregroundColor(MixNotesDesign.charcoal)
+                    .foregroundColor(MixNotesDesign.darkTaupe)
 
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
-                        Rectangle()
+                        // Track
+                        Capsule()
                             .fill(MixNotesDesign.lightTaupe)
-                            .frame(height: 1)
+                            .frame(height: 4)
 
-                        Rectangle()
+                        // Filled portion
+                        Capsule()
                             .fill(MixNotesDesign.mediumTaupe)
-                            .frame(width: geometry.size.width * viewModel.progress, height: 1)
+                            .frame(width: geometry.size.width * viewModel.progress, height: 4)
 
+                        // Thumb
                         Circle()
                             .fill(MixNotesDesign.charcoal)
-                            .frame(width: 8, height: 8)
-                            .offset(x: geometry.size.width * viewModel.progress - 4)
+                            .frame(width: 14, height: 14)
+                            .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                            .offset(x: geometry.size.width * viewModel.progress - 7)
                     }
                     .contentShape(Rectangle())
                     .gesture(
@@ -353,15 +394,16 @@ struct ContentView: View {
                             }
                     )
                 }
-                .frame(height: 10)
+                .frame(height: 20)
 
                 Text(timeString(from: viewModel.duration))
-                    .font(MixNotesDesign.sfFont(16))
+                    .font(MixNotesDesign.sfFont(14, weight: .medium))
                     .monospacedDigit()
-                    .foregroundColor(MixNotesDesign.warmGray)
+                    .foregroundColor(MixNotesDesign.darkTaupe)
             }
             .padding(.horizontal, 24)
-            .padding(.top, -8)
+            .padding(.top, 4)
+            .padding(.bottom, 8)
 
             LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(AnnotationType.allCases, id: \.self) { type in
@@ -377,12 +419,19 @@ struct ContentView: View {
                         }
                     } label: {
                         Text(type.rawValue)
-                            .font(MixNotesDesign.sfFont(14))
+                            .font(MixNotesDesign.sfFont(15, weight: .medium))
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 11)
-                            .background(MixNotesDesign.charcoal)
-                            .foregroundColor(MixNotesDesign.cream)
-                            .cornerRadius(6)
+                            .padding(.vertical, 12)
+                            .background(
+                                LinearGradient(
+                                    colors: [MixNotesDesign.charcoal, MixNotesDesign.charcoal.opacity(0.85)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .foregroundColor(.white)
+                            .cornerRadius(16)
+                            .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
                     }
                 }
             }
